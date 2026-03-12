@@ -44,6 +44,53 @@ Use this skill when the user asks about:
 - Product specifications or manuals
 - Technical knowledge base content
 - Any factual information stored in documents
+- **What datasets are available**
+- **Details about a specific dataset**
+
+## 📚 Managing Datasets
+
+This skill supports listing datasets and getting detailed information.
+
+### List All Datasets
+
+When the user asks "what datasets do you have?" or "show available datasets":
+
+```bash
+# Using curl
+curl -s -X GET "${RAGFLOW_API_URL}/api/v1/datasets" \
+  -H "Authorization: Bearer ${RAGFLOW_API_KEY}" | jq '.data[] | {
+    name: .name,
+    id: .id,
+    description: .description,
+    chunks: .chunk_num
+  }'
+
+# Or use the helper script
+./datasets.sh list
+```
+
+### Get Dataset Details
+
+When the user asks for details about a specific dataset:
+
+```bash
+# Using curl (replace DATASET_ID)
+curl -s -X GET "${RAGFLOW_API_URL}/api/v1/datasets" \
+  -H "Authorization: Bearer ${RAGFLOW_API_KEY}" | \
+  jq '.data[] | select(.id == "DATASET_ID")'
+
+# Or use the helper script
+./datasets.sh info DATASET_ID
+```
+
+### Dataset Information Includes
+
+- **name**: Dataset name
+- **id**: Unique dataset identifier
+- **description**: What the dataset contains
+- **chunk_num**: Number of document chunks
+- **created_at**: When it was created
+- **permission**: Access permissions
 
 ## 📖 How to Search
 

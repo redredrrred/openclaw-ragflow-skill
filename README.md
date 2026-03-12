@@ -9,11 +9,12 @@
 ## ✨ Features
 
 - 🔍 **Smart Search**: Search across multiple RAGFlow datasets
-- 📚 **Knowledge Integration**: Seamlessly retrieve information from documents
+- 📚 **Dataset Management**: List and inspect available datasets
 - 🎯 **High Accuracy**: Vector similarity + keyword matching
 - 🌏 **Multi-Language**: Supports Chinese and English content
 - ⚡ **Fast**: Direct API calls without overhead
 - 🛠️ **Easy Setup**: Just configure environment variables
+- 📊 **Detailed Info**: Get dataset statistics and metadata
 
 ## 📋 Prerequisites
 
@@ -95,6 +96,28 @@ AI: According to the Product Catalog, Product X has...
      Source: Product Specs (Similarity: 91%)
 ```
 
+### Example 4: Listing Datasets
+
+```
+User: What datasets do you have?
+AI: [Lists all available RAGFlow datasets]
+     Found 6 datasets:
+     - 醉清风 (1,234 chunks)
+     - 杜克采购文档 (567 chunks)
+     - ...
+```
+
+### Example 5: Dataset Details
+
+```
+User: Tell me about the "醉清风" dataset
+AI: [Shows detailed information]
+     Dataset: 醉清风
+     ID: 8b29e240dc8611f0b88e02bd655462b6
+     Chunks: 1,234
+     Created: 2026-03-10
+```
+
 ## ⚙️ Configuration
 
 ### Environment Variables
@@ -125,9 +148,15 @@ curl http://127.0.0.1/api/v1/datasets \
 Test the skill directly without OpenClaw:
 
 ```bash
-# Using the search helper
+# Search knowledge base
 cd ~/.openclaw/workspace/skills/ragflow-knowledge
 ./search.sh "your search query"
+
+# List all datasets
+./datasets.sh list
+
+# Get dataset details
+./datasets.sh info 8b29e240dc8611f0b88e02bd655462b6
 
 # Or using curl directly
 curl -X POST "http://127.0.0.1/api/v1/retrieval" \
