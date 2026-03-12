@@ -152,11 +152,17 @@ Test the skill directly without OpenClaw:
 cd ~/.openclaw/workspace/skills/ragflow-knowledge
 ./search.sh "your search query"
 
-# List all datasets
+# List all datasets (bash version - requires jq)
 ./datasets.sh list
 
-# Get dataset details
+# List all datasets (Python version - cross-platform)
+python datasets.py list
+
+# Get dataset details (bash version - requires jq)
 ./datasets.sh info 8b29e240dc8611f0b88e02bd655462b6
+
+# Get dataset details (Python version - cross-platform)
+python datasets.py info 8b29e240dc8611f0b88e02bd655462b6
 
 # Or using curl directly
 curl -X POST "http://127.0.0.1/api/v1/retrieval" \
