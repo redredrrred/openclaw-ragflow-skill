@@ -9,7 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Load .env file if exists
 if [ -f "$SCRIPT_DIR/.env" ]; then
-    export $(cat "$SCRIPT_DIR/.env" | grep -v '^#' | grep -v '^[[:space:]]*$' | xargs)
+    # Source only simple variables, skip JSON arrays
+    eval "$(grep -E '^[A-Z_]+=' "$SCRIPT_DIR/.env" | grep -v '\[' | sed 's/^/export /')"
 fi
 
 # Configuration with defaults
