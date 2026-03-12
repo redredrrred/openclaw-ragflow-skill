@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 RAGFlow Knowledge Search (Python version - no jq dependency)
 Usage: python search.py [OPTIONS] "<search query>"
@@ -10,14 +11,22 @@ import json
 import urllib.request
 import urllib.parse
 from urllib.parse import urlencode
+import io
+
+# Fix Windows UTF-8 output
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 def load_env():
-    """Load .env file"""
+    """Load .env file from parent directory"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Look in parent directory
     env_file = os.path.join(script_dir, '..', '.env')
 
+    # Fallback to openclaw workspace
     if not os.path.exists(env_file):
-        openclaw_env = os.path.expanduser('~/.openclaw/workspace/skills/openclaw-ragflow-skill/.env')
+        openclaw_env = os.path.expanduser('~/.openclaw/workspace/skills/ragflow-knowledge/.env')
         if os.path.exists(openclaw_env):
             env_file = openclaw_env
 
@@ -32,10 +41,15 @@ def load_env():
                 continue
             if '=' in line and not line.startswith('export'):
                 key, value = line.split('=', 1)
-                # Skip JSON arrays
-                if '[' in value:
-                    continue
-                env_vars[key.strip()] = value.strip()
+                # Parse JSON arrays properly
+                value = value.strip()
+                if value.startswith('[') and value.endswith(']'):
+                    try:
+                        env_vars[key.strip()] = json.loads(value)
+                    except:
+                        env_vars[key.strip()] = value
+                else:
+                    env_vars[key.strip()] = value
 
     return env_vars
 

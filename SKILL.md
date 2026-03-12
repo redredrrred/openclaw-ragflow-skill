@@ -1,6 +1,6 @@
 ---
 name: ragflow_knowledge
-description: RAGFlow knowledge retrieval via HTTP API - search documents, datasets, chunks, and memories
+description: When user asks to search RAGFlow knowledge base, query documents in RAGFlow, look up information from ragflow, or search datasets. Keywords: "ragflow search", "ragflow 搜索", "查一下ragflow", "ragflow里有什么", "用ragflow找"
 license: MIT
 ---
 
@@ -8,9 +8,9 @@ license: MIT
 
 RAGFlow-powered knowledge retrieval and document management.
 
-## ⚠️ For AI: Use These Scripts
+## How to Use
 
-**DO NOT write custom API code.** Always use these scripts:
+When user asks to search RAGFlow, use these scripts (DO NOT write custom API code):
 
 ```bash
 # Search knowledge base
@@ -28,11 +28,9 @@ python scripts/memory.py list
 
 The scripts handle Windows UTF-8 encoding, environment loading, and error handling.
 
-## 🚀 Quick Start
+## Configuration
 
-### Configuration
-
-Set environment variables in `.env` file:
+Environment variables in `.env` file:
 
 ```bash
 RAGFLOW_API_URL=http://127.0.0.1
@@ -40,71 +38,36 @@ RAGFLOW_API_KEY=ragflow-your-api-key-here
 RAGFLOW_DATASET_IDS=["dataset-id-1", "dataset-id-2"]
 ```
 
-### Basic Usage
+## Search Options
 
 ```bash
-# Search knowledge base
-python scripts/search.py "your search query"
+# Basic search
+python scripts/search.py "your query"
 
-# List datasets
-python scripts/datasets.py list
-
-# Manage memory
-python scripts/memory.py list
-```
-
-## 🔍 Search Knowledge Base
-
-### Basic Search
-
-```bash
-curl -s -X POST "${RAGFLOW_API_URL}/api/v1/retrieval" \
-  -H "Authorization: Bearer ${RAGFLOW_API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Your search query"}'
-```
-
-### Advanced Search with Python Script
-
-```bash
-# High-precision search
-python scripts/search.py --threshold 0.7 --vector-weight 0.7 "query"
+# High precision (higher threshold)
+python scripts/search.py --threshold 0.7 "query"
 
 # With knowledge graph
-python scripts/search.py --use-kg "conceptual query"
+python scripts/search.py --use-kg "query"
 
 # Limit to specific documents
 python scripts/search.py --doc-ids "doc1,doc2" "query"
+
+# Use retrieval_test API (lower threshold by default)
+python scripts/search.py --retrieval-test --kb-id <dataset_id> "query"
 ```
 
-## 📚 Dataset Management
-
-### List Datasets
+## Dataset Management
 
 ```bash
+# List all datasets
 python scripts/datasets.py list
-```
 
-### Get Dataset Details
-
-```bash
+# Get dataset details
 python scripts/datasets.py info DATASET_ID
 ```
 
-### Dataset API Fields
-
-When listing datasets, each dataset contains:
-- `name` - Dataset name
-- `id` - Unique identifier
-- `description` - Description text
-- `chunk_count` - Number of document chunks
-- `document_count` - Number of documents
-- `created_at` - Creation timestamp
-- `permission` - Access permissions
-
-## 🧠 Memory Management
-
-### Memory Operations
+## Memory Management
 
 ```bash
 # List all memories
@@ -118,21 +81,9 @@ python scripts/memory.py messages MEMORY_ID
 
 # Search messages
 python scripts/memory.py search MEMORY_ID "search query"
-
-# Delete memory
-python scripts/memory.py delete MEMORY_ID
 ```
 
-### Memory Types
-
-- `longtime` - Long-term memory storage
-- `user` - User-specific memories
-- `agent` - Agent memories
-- `session` - Session-based memories
-
-## 📝 Chunk Management
-
-### Chunk CRUD Operations
+## Chunk Management
 
 ```bash
 # List chunks in document
@@ -151,59 +102,24 @@ python scripts/chunks.py update DOC_ID CHUNK_ID "updated content"
 python scripts/chunks.py delete DOC_ID CHUNK_ID1,CHUNK_ID2
 ```
 
-## 🔧 Advanced Retrieval
+## API Endpoints
 
-### Retrieval Parameters
+**Retrieval:**
+- `POST /api/v1/retrieval` - Basic retrieval (no auth, uses dataset_ids)
+- `POST /api/v1/chunk/retrieval_test` - Advanced retrieval (login required, uses kb_id)
 
-**Core Parameters:**
-- `question` (required) - Search query
-- `dataset_ids` / `kb_id` - Dataset identifier
-- `top_k` - Maximum results (default: 1024)
-- `similarity_threshold` - Minimum similarity (0-1)
-
-**Similarity Control:**
-- `vector_similarity_weight` - Vector vs keyword balance (default: 0.3)
-- Lower (0.1) favors keywords, higher (0.7) favors semantics
-
-**Content Filtering:**
-- `doc_ids` - Limit to specific documents
-- `meta_data_filter` - Filter by metadata
-
-**Advanced Features:**
-- `keyword` - Extract keywords for matching
-- `rerank_id` - Use reranking model
-- `use_kg` - Include knowledge graph
-- `cross_languages` - Multilingual search
-
-### Basic vs Retrieval Test API
-
-**Basic Retrieval** (`/api/v1/retrieval`):
-- No login required
-- Uses `dataset_ids` parameter
-- Default threshold: 0.2
-
-**Retrieval Test** (`/api/v1/chunk/retrieval_test`):
-- Login required
-- Uses `kb_id` parameter (required)
-- Default threshold: 0.0
-- Returns additional `labels` field
-- Supports advanced metadata filtering
-
-## 📖 API Endpoints Reference
-
-### Knowledge Base & Retrieval
-- `POST /api/v1/retrieval` - Basic retrieval
-- `POST /api/v1/chunk/retrieval_test` - Advanced retrieval (login)
+**Datasets:**
 - `GET /api/v1/datasets` - List datasets
+
+**Chunks:**
 - `GET /api/v1/chunk/get` - Get chunk details
 - `POST /api/v1/chunk/create` - Create chunk
 - `POST /api/v1/chunk/set` - Update chunk
 - `POST /api/v1/chunk/switch` - Toggle availability
 - `POST /api/v1/chunk/rm` - Delete chunks
 - `POST /api/v1/chunk/list` - List chunks in document
-- `GET /api/v1/chunk/knowledge_graph` - Get knowledge graph
 
-### Memory Management
+**Memory:**
 - `POST /api/v1/memories` - Create memory
 - `PUT /api/v1/memories/<id>` - Update memory
 - `DELETE /api/v1/memories/<id>` - Delete memory
@@ -214,53 +130,3 @@ python scripts/chunks.py delete DOC_ID CHUNK_ID1,CHUNK_ID2
 - `DELETE /api/v1/messages/<mid>:<msgid>` - Forget message
 - `PUT /api/v1/messages/<mid>:<msgid>` - Update status
 - `GET /api/v1/messages/search` - Search messages
-- `GET /api/v1/messages` - Get recent messages
-- `GET /api/v1/messages/<mid>:<msgid>/content` - Get content
-
-## 📊 Response Format
-
-```json
-{
-  "code": 0,
-  "data": {
-    "chunks": [
-      {
-        "chunk_id": "unique-id",
-        "content": "Document content...",
-        "similarity": 0.8923,
-        "document_keyword": "document.pdf",
-        "doc_id": "doc-id",
-        "dataset_id": "dataset-id"
-      }
-    ],
-    "doc_aggs": [
-      {
-        "doc_id": "doc-id",
-        "count": 5,
-        "doc_name": "document.pdf"
-      }
-    ]
-  }
-}
-```
-
-## 🛠️ Troubleshooting
-
-### Connection Issues
-
-```bash
-curl "${RAGFLOW_API_URL}/api/v1/datasets" \
-  -H "Authorization: Bearer ${RAGFLOW_API_KEY}"
-```
-
-### No Results Found
-
-- Lower `similarity_threshold` to 0.1
-- Increase `top_k` to 20+
-- Enable `keyword` extraction
-- Verify datasets contain documents
-
-## 📚 Resources
-
-- RAGFlow Documentation: https://ragflow.io/docs
-- HTTP API Reference: https://ragflow.io/docs/dev/http_api_reference
