@@ -1,192 +1,292 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-RAGFlow Datasets Manager
-Usage: python datasets.py [list|info] [dataset_id]
-"""
 
-import os
-import sys
+import argparse
 import json
-import urllib.request
-import io
+from typing import Any
 
-# Fix Windows UTF-8 output
-if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+from common import (
+    DataError,
+    ScriptError,
+    configure_stdio_utf8,
+    current_timestamp,
+    ensure_success,
+    format_json,
+    load_repo_env,
+    repo_root_from_path,
+    request_json,
+    require_api_key,
+    resolve_base_url,
+)
 
-def load_env():
-    """Load .env file from parent directory"""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    # Look in parent directory
-    env_file = os.path.join(script_dir, '..', '.env')
 
-    # Fallback to openclaw workspace
-    if not os.path.exists(env_file):
-        openclaw_env = os.path.expanduser('~/.openclaw/workspace/skills/ragflow-knowledge/.env')
-        if os.path.exists(openclaw_env):
-            env_file = openclaw_env
+def _build_global_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--json", action="store_true", dest="json_output", help="Print JSON output")
+    parser.add_argument(
+        "--base-url",
+        help="Base URL for the RAGFlow server (priority: --base-url > RAGFLOW_API_URL > RAGFLOW_BASE_URL > HOST_ADDRESS > default)",
+    )
+    return parser
 
-    if not os.path.exists(env_file):
-        return {}
 
-    env_vars = {}
-    with open(env_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            if '=' in line and not line.startswith('export'):
-                key, value = line.split('=', 1)
-                # Parse JSON arrays properly
-                value = value.strip()
-                if value.startswith('[') and value.endswith(']'):
-                    try:
-                        env_vars[key.strip()] = json.loads(value)
-                    except:
-                        env_vars[key.strip()] = value
-                else:
-                    env_vars[key.strip()] = value
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    global_parser = _build_global_parser()
+    parser = argparse.ArgumentParser(
+        description="List, inspect, or create RAGFlow datasets.",
+        parents=[global_parser],
+    )
+    subparsers = parser.add_subparsers(dest="command")
 
-    return env_vars
+    list_parser = subparsers.add_parser("list", help="List datasets", parents=[global_parser])
+    list_parser.set_defaults(command="list")
 
-def api_request(url, api_key):
-    """Make API request to RAGFlow"""
-    headers = {
-        'Authorization': f'Bearer {api_key}',
-        'Content-Type': 'application/json'
+    info_parser = subparsers.add_parser("info", help="Show one dataset", parents=[global_parser])
+    info_parser.add_argument("dataset_id", help="Dataset ID")
+    info_parser.set_defaults(command="info")
+
+    create_parser = subparsers.add_parser("create", help="Create a dataset", parents=[global_parser])
+    create_parser.add_argument("name", help="Dataset name")
+    create_parser.add_argument("--avatar", help="Dataset avatar")
+    create_parser.add_argument("--description", default="", help="Dataset description")
+    create_parser.add_argument("--embedding-model", dest="embedding_model", help="Embedding model ID")
+    create_parser.add_argument("--permission", help="Permission value, for example me or team")
+    create_parser.add_argument("--chunk-method", dest="chunk_method", help="Chunking method / parser ID")
+    create_parser.add_argument("--language", help="Dataset language")
+    create_parser.set_defaults(command="create")
+
+    delete_parser = subparsers.add_parser("delete", help="Delete datasets", parents=[global_parser])
+    delete_parser.add_argument(
+        "--ids",
+        required=True,
+        help="Comma-separated dataset IDs, for example: id_1,id_2",
+    )
+    delete_parser.set_defaults(command="delete")
+
+    args = parser.parse_args(argv)
+    if not args.command:
+        args.command = "list"
+    return args
+
+
+def _normalize_dataset(dataset: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": dataset.get("id"),
+        "name": dataset.get("name"),
+        "avatar": dataset.get("avatar"),
+        "description": dataset.get("description"),
+        "chunk_count": dataset.get("chunk_count"),
+        "created_at": dataset.get("created_at"),
+        "permission": dataset.get("permission"),
+        "embedding_model": dataset.get("embedding_model") or dataset.get("embd_id"),
+        "chunk_method": dataset.get("chunk_method") or dataset.get("parser_id"),
+        "language": dataset.get("language"),
     }
 
+
+def list_datasets(*, base_url: str, api_key: str) -> dict[str, Any]:
+    payload = ensure_success(request_json(f"{base_url}/api/v1/datasets", api_key))
+    datasets = payload.get("data")
+    if not isinstance(datasets, list):
+        raise DataError("Dataset list response missing data array.")
+    normalized = [_normalize_dataset(dataset) for dataset in datasets]
+    return {
+        "checked_at": current_timestamp(),
+        "count": len(normalized),
+        "datasets": normalized,
+    }
+
+
+def dataset_info(dataset_id: str, *, base_url: str, api_key: str) -> dict[str, Any]:
+    payload = list_datasets(base_url=base_url, api_key=api_key)
+    for dataset in payload["datasets"]:
+        if dataset.get("id") == dataset_id:
+            return {
+                "checked_at": current_timestamp(),
+                "dataset": dataset,
+            }
+    raise DataError(f"Dataset not found: {dataset_id}")
+
+
+def _build_create_payload(args: argparse.Namespace) -> dict[str, Any]:
+    name = args.name.strip()
+    if not name:
+        raise DataError("Dataset name must not be empty.")
+
+    payload: dict[str, Any] = {"name": name}
+    if args.avatar:
+        payload["avatar"] = args.avatar
+    if args.description:
+        payload["description"] = args.description
+    if args.embedding_model:
+        payload["embedding_model"] = args.embedding_model
+    if args.permission:
+        payload["permission"] = args.permission
+    if args.chunk_method:
+        payload["chunk_method"] = args.chunk_method
+    if args.language:
+        payload["language"] = args.language
+    return payload
+
+
+def _parse_ids(raw_value: str, *, label: str) -> list[str]:
+    ids: list[str] = []
+    seen: set[str] = set()
+
+    for item in raw_value.split(","):
+        value = item.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ids.append(value)
+
+    if not ids:
+        raise DataError(f"{label} must include at least one ID.")
+    return ids
+
+
+def create_dataset(args: argparse.Namespace, *, base_url: str, api_key: str) -> dict[str, Any]:
+    payload = ensure_success(
+        request_json(
+            f"{base_url}/api/v1/datasets",
+            api_key,
+            method="POST",
+            body=json.dumps(_build_create_payload(args)).encode("utf-8"),
+            content_type="application/json",
+        )
+    )
+    dataset = payload.get("data")
+    if not isinstance(dataset, dict):
+        raise DataError("Dataset create response missing data object.")
+    return {
+        "created_at": current_timestamp(),
+        "dataset": _normalize_dataset(dataset),
+    }
+
+
+def delete_datasets(raw_ids: str, *, base_url: str, api_key: str) -> dict[str, Any]:
+    dataset_ids = _parse_ids(raw_ids, label="--ids")
+    payload = ensure_success(
+        request_json(
+            f"{base_url}/api/v1/datasets",
+            api_key,
+            method="DELETE",
+            body=json.dumps({"ids": dataset_ids}).encode("utf-8"),
+            content_type="application/json",
+        )
+    )
+    return {
+        "deleted_at": current_timestamp(),
+        "dataset_ids": dataset_ids,
+        "message": payload.get("message", ""),
+        "data": payload.get("data"),
+    }
+
+
+def _format_list(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Checked at: {payload['checked_at']}",
+        f"Datasets: {payload['count']}",
+    ]
+    for dataset in payload["datasets"]:
+        lines.extend(
+            [
+                "",
+                f"- {dataset.get('name') or 'unknown'}",
+                f"  id: {dataset.get('id') or 'unknown'}",
+                f"  chunks: {dataset.get('chunk_count') if dataset.get('chunk_count') is not None else 'unknown'}",
+                f"  created_at: {dataset.get('created_at') or 'unknown'}",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _format_info(payload: dict[str, Any]) -> str:
+    dataset = payload["dataset"]
+    return "\n".join(
+        [
+            f"Checked at: {payload['checked_at']}",
+            f"Name: {dataset.get('name') or 'unknown'}",
+            f"ID: {dataset.get('id') or 'unknown'}",
+            f"Description: {dataset.get('description') or 'unknown'}",
+            f"Chunk count: {dataset.get('chunk_count') if dataset.get('chunk_count') is not None else 'unknown'}",
+            f"Created at: {dataset.get('created_at') or 'unknown'}",
+            f"Permission: {dataset.get('permission') or 'unknown'}",
+        ]
+    )
+
+
+def _format_create(payload: dict[str, Any]) -> str:
+    dataset = payload["dataset"]
+    lines = [
+        f"Created at: {payload['created_at']}",
+        f"Name: {dataset.get('name') or 'unknown'}",
+        f"ID: {dataset.get('id') or 'unknown'}",
+        f"Description: {dataset.get('description') or 'unknown'}",
+        f"Chunk count: {dataset.get('chunk_count') if dataset.get('chunk_count') is not None else 'unknown'}",
+        f"Created at (server): {dataset.get('created_at') or 'unknown'}",
+        f"Permission: {dataset.get('permission') or 'unknown'}",
+    ]
+    for label, key in (
+        ("Avatar", "avatar"),
+        ("Embedding model", "embedding_model"),
+        ("Chunk method", "chunk_method"),
+        ("Language", "language"),
+    ):
+        value = dataset.get(key)
+        if value:
+            lines.append(f"{label}: {value}")
+    return "\n".join(lines)
+
+
+def _format_delete(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Deleted at: {payload['deleted_at']}",
+        f"Datasets: {', '.join(payload['dataset_ids'])}",
+    ]
+    message = payload.get("message")
+    if isinstance(message, str) and message.strip():
+        lines.append(f"Message: {message.strip()}")
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    configure_stdio_utf8()
+    load_repo_env(repo_root_from_path(__file__))
+    args = _parse_args(argv)
+
     try:
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=10) as response:
-            return json.loads(response.read().decode('utf-8'))
-    except urllib.error.HTTPError as e:
-        return {'code': e.code, 'data': []}
-    except Exception as e:
-        return {'code': -1, 'data': [], 'error': str(e)}
+        base_url = resolve_base_url(args.base_url)
+        api_key = require_api_key()
 
-def list_datasets():
-    """List all datasets"""
-    env = load_env()
-    api_url = env.get('RAGFLOW_API_URL', 'http://127.0.0.1')
-    api_key = env.get('RAGFLOW_API_KEY', '')
+        if args.command == "list":
+            payload = list_datasets(base_url=base_url, api_key=api_key)
+            print(format_json(payload) if args.json_output else _format_list(payload))
+            return 0
 
-    if not api_key or api_key == 'ragflow-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx':
-        print("[Error] Error: RAGFLOW_API_KEY not set!")
-        print("\nPlease set your RAGFlow API key in .env file")
-        sys.exit(1)
+        if args.command == "info":
+            payload = dataset_info(args.dataset_id, base_url=base_url, api_key=api_key)
+            print(format_json(payload) if args.json_output else _format_info(payload))
+            return 0
 
-    print(f"[List] Fetching RAGFlow datasets from {api_url}...\n")
+        if args.command == "create":
+            payload = create_dataset(args, base_url=base_url, api_key=api_key)
+            print(format_json(payload) if args.json_output else _format_create(payload))
+            return 0
 
-    url = f"{api_url}/api/v1/datasets"
-    result = api_request(url, api_key)
+        if args.command == "delete":
+            payload = delete_datasets(args.ids, base_url=base_url, api_key=api_key)
+            print(format_json(payload) if args.json_output else _format_delete(payload))
+            return 0
 
-    if result.get('code') != 0:
-        print(f"[Error] API Error: {result.get('code', 'unknown')}")
-        if 'error' in result:
-            print(f"   {result['error']}")
-        sys.exit(1)
+        raise DataError(f"Unsupported command: {args.command}")
+    except ScriptError as exc:
+        if args.json_output:
+            print(format_json({"checked_at": current_timestamp(), "error": str(exc)}))
+        else:
+            print(f"Error: {exc}")
+        return 1
 
-    datasets = result.get('data', [])
 
-    if not datasets:
-        print("[Warning]️  No datasets found\n")
-        print("Possible reasons:")
-        print("  1. No datasets created in RAGFlow")
-        print("  2. Invalid API key")
-        print("  3. API permissions issue")
-        sys.exit(0)
-
-    print(f"[OK] Found {len(datasets)} dataset(s):\n")
-
-    for ds in datasets:
-        print(f"[Dir] {ds.get('name', 'Unknown')}")
-        print(f"   ID: {ds.get('id', 'N/A')}")
-        print(f"   Description: {ds.get('description', 'No description')}")
-        print(f"   Chunk Count: {ds.get('chunk_count', 0)} chunks")
-        print(f"   Created: {ds.get('created_at', 'Unknown')}")
-        print("   ───────────────────────────────────────")
-
-def dataset_info(dataset_id):
-    """Get dataset details"""
-    env = load_env()
-    api_url = env.get('RAGFLOW_API_URL', 'http://127.0.0.1')
-    api_key = env.get('RAGFLOW_API_KEY', '')
-
-    if not api_key or api_key == 'ragflow-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx':
-        print("[Error] Error: RAGFLOW_API_KEY not set!")
-        sys.exit(1)
-
-    print(f"[Search] Fetching dataset info...")
-    print(f"Dataset ID: {dataset_id}\n")
-
-    url = f"{api_url}/api/v1/datasets"
-    result = api_request(url, api_key)
-
-    if result.get('code') != 0:
-        print(f"[Error] API Error: {result.get('code', 'unknown')}")
-        sys.exit(1)
-
-    datasets = result.get('data', [])
-    dataset = None
-
-    for ds in datasets:
-        if ds.get('id') == dataset_id:
-            dataset = ds
-            break
-
-    if not dataset:
-        print(f"[Warning]️  Dataset not found: {dataset_id}\n")
-        print("To list all available datasets, run:")
-        print("  python datasets.py list")
-        sys.exit(1)
-
-    print("[OK] Dataset Details:\n")
-    print(f"[Dir] Name: {dataset.get('name', 'Unknown')}")
-    print(f"[ID] ID: {dataset.get('id', 'N/A')}")
-    print(f"[Desc] Description: {dataset.get('description', 'No description')}")
-    print(f"[Count] Chunk Count: {dataset.get('chunk_count', 0)} chunks")
-    print(f"[Date] Created: {dataset.get('created_at', 'Unknown')}")
-    print(f"[Key] Permission: {dataset.get('permission', 'Unknown')}")
-
-    chunk_count = dataset.get('chunk_count', 0)
-    if chunk_count > 0:
-        print(f"\n[OK] Dataset has {chunk_count} document chunks")
-    else:
-        print("\n[Warning]️  Dataset is empty (no chunks)")
-
-def main():
-    if len(sys.argv) < 2:
-        list_datasets()
-        return
-
-    command = sys.argv[1].lower()
-
-    if command == 'list':
-        list_datasets()
-    elif command == 'info':
-        if len(sys.argv) < 3:
-            print("[Error] Error: Dataset ID is required")
-            print("\nUsage: python datasets.py info <dataset_id>")
-            print("\nExample: python datasets.py info 8b29e240dc8611f0b88e02bd655462b6")
-            sys.exit(1)
-        dataset_info(sys.argv[2])
-    elif command in ['help', '--help', '-h']:
-        print("RAGFlow Datasets Manager")
-        print("\nUsage: python datasets.py [command] [arguments]")
-        print("\nCommands:")
-        print("  list              List all datasets (default)")
-        print("  info <dataset_id>  Show detailed information about a dataset")
-        print("  help              Show this help message")
-        print("\nExamples:")
-        print("  python datasets.py list")
-        print("  python datasets.py info 8b29e240dc8611f0b88e02bd655462b6")
-    else:
-        print(f"[Warning]️  Unknown command: {command}")
-        print("\nRun 'python datasets.py help' for usage information")
-        sys.exit(1)
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    raise SystemExit(main())

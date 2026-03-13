@@ -1,132 +1,155 @@
 ---
-name: ragflow_knowledge
-description: When user asks to search RAGFlow knowledge base, query documents in RAGFlow, look up information from ragflow, or search datasets. Keywords: "ragflow search", "ragflow 搜索", "查一下ragflow", "ragflow里有什么", "用ragflow找"
-license: MIT
+name: ragflow-dataset-ingest
+description: "Use for RAGFlow dataset and retrieval tasks: create, list, inspect, update, or delete datasets; list, upload, update, or delete documents in a dataset; start parsing uploaded documents; track parser status through `parse.py`; and retrieve relevant chunks from RAGFlow datasets with `search.py`."
 ---
 
-# RAGFlow Knowledge
+# RAGFlow Dataset And Retrieval
 
-RAGFlow-powered knowledge retrieval and document management.
+Use only the bundled scripts in `scripts/`.
 
-## How to Use
-
-When user asks to search RAGFlow, use these scripts (DO NOT write custom API code):
+## Workflow
 
 ```bash
-# Search knowledge base
-python scripts/search.py "query"
-
-# List datasets
+python scripts/datasets.py create "My Dataset" --description "Optional description"
 python scripts/datasets.py list
-
-# Manage chunks
-python scripts/chunks.py list <doc_id>
-
-# Memory operations
-python scripts/memory.py list
+python scripts/datasets.py info DATASET_ID
+python scripts/update_dataset.py DATASET_ID --name "Renamed Dataset"
 ```
 
-The scripts handle Windows UTF-8 encoding, environment loading, and error handling.
+1. Create a dataset or confirm the target dataset.
+2. Upload files.
 
-## Configuration
-
-Environment variables in `.env` file:
+When asking the user to provide files, prefer explicit local file paths. If the user's client supports drag-and-drop, they may also drop files into the conversation, but local paths work best and large drag-and-drop uploads may fail.
 
 ```bash
-RAGFLOW_API_URL=http://127.0.0.1
+python scripts/upload.py list DATASET_ID --json
+python scripts/upload.py DATASET_ID /path/to/file1 [/path/to/file2 ...]
+python scripts/update_document.py DATASET_ID DOC_ID --name "Renamed Document"
+```
+
+Upload output returns `document_ids`. Pass those IDs into the next step.
+
+Use delete commands when the task is cleanup instead of ingest:
+
+```bash
+python scripts/datasets.py delete --ids DATASET_ID1,DATASET_ID2
+python scripts/upload.py delete DATASET_ID --ids DOC_ID1,DOC_ID2
+```
+
+3. Start parsing and return parser status.
+
+```bash
+python scripts/parse.py DATASET_ID DOC_ID1 [DOC_ID2 ...]
+```
+
+`parse.py` always starts parsing first, then returns status in one of three modes:
+- default: return one current parser status snapshot
+- `--watch`: print periodic status updates until the target documents reach terminal states
+- `--background`: start a detached watcher and return `pid`, `output_path`, and `error_path`
+
+For later requests like "Check the progress" or "Which files are currently being parsed", resolve scope by specificity:
+- no dataset specified: inspect all datasets and all documents
+- dataset specified: inspect all documents in that dataset
+- document IDs specified: inspect only those documents
+
+4. Retrieve chunks from one or more datasets when the user asks knowledge questions against RAGFlow.
+
+```bash
+python scripts/search.py "What does the warranty policy say?"
+python scripts/search.py "What does the warranty policy say?" DATASET_ID
+python scripts/search.py --dataset-ids DATASET_ID1,DATASET_ID2 --doc-ids DOC_ID1,DOC_ID2 "What does the warranty policy say?"
+python scripts/search.py --threshold 0.7 --top-k 10 "query"
+python scripts/search.py --retrieval-test --kb-id DATASET_ID "query"
+```
+
+## Scope
+
+Support only:
+- create datasets
+- list datasets
+- inspect datasets
+- update datasets
+- delete datasets
+- upload documents to a dataset
+- list documents in a dataset
+- update documents in a dataset
+- delete documents from a dataset
+- start parsing documents in a dataset
+- return one current parser status snapshot
+- print periodic parse status updates
+- start a background parse watcher
+- list all currently parsing documents in a dataset for broad progress requests
+- aggregate parse progress across all datasets for broad progress requests
+- retrieve relevant chunks from one or more datasets
+- limit retrieval to specific dataset IDs or document IDs
+- use `retrieval_test` for single-dataset debugging when needed
+
+Do not use this skill for chunk editing, memory APIs, or other RAGFlow capabilities outside dataset operations and retrieval.
+
+## Environment
+
+Configure `.env` with:
+
+```bash
+RAGFLOW_BASE_URL=http://127.0.0.1:9380
 RAGFLOW_API_KEY=ragflow-your-api-key-here
 RAGFLOW_DATASET_IDS=["dataset-id-1", "dataset-id-2"]
 ```
 
-## Search Options
+## Endpoints
+
+- `GET /api/v1/datasets`
+- `POST /api/v1/datasets`
+- `PUT /api/v1/datasets/<dataset_id>`
+- `DELETE /api/v1/datasets`
+- `POST /api/v1/datasets/<dataset_id>/documents`
+- `PUT /api/v1/datasets/<dataset_id>/documents/<document_id>`
+- `DELETE /api/v1/datasets/<dataset_id>/documents`
+- `POST /api/v1/datasets/<dataset_id>/chunks`
+- `GET /api/v1/datasets/<dataset_id>/documents`
+- `POST /api/v1/retrieval`
+- `POST /api/v1/chunk/retrieval_test`
+
+## Commands
 
 ```bash
-# Basic search
-python scripts/search.py "your query"
-
-# High precision (higher threshold)
-python scripts/search.py --threshold 0.7 "query"
-
-# With knowledge graph
-python scripts/search.py --use-kg "query"
-
-# Limit to specific documents
-python scripts/search.py --doc-ids "doc1,doc2" "query"
-
-# Use retrieval_test API (lower threshold by default)
-python scripts/search.py --retrieval-test --kb-id <dataset_id> "query"
-```
-
-## Dataset Management
-
-```bash
-# List all datasets
+python scripts/datasets.py create "Example Dataset" --description "Quarterly reports"
+python scripts/datasets.py create "Example Dataset" --embedding-model bge-m3 --chunk-method naive --permission me
 python scripts/datasets.py list
-
-# Get dataset details
 python scripts/datasets.py info DATASET_ID
+python scripts/update_dataset.py DATASET_ID --name "Updated Dataset" --description "Updated description"
+python scripts/datasets.py delete --ids DATASET_ID1,DATASET_ID2 --json
+python scripts/upload.py list DATASET_ID --json
+python scripts/upload.py DATASET_ID ./example.pdf --json
+python scripts/update_document.py DATASET_ID DOC_ID --name "Updated Document" --enabled 1 --json
+python scripts/upload.py delete DATASET_ID --ids DOC_ID1,DOC_ID2 --json
+python scripts/datasets.py list --json
+python scripts/parse.py DATASET_ID DOC_ID1 --json
+python scripts/parse.py DATASET_ID DOC_ID1 --watch --json
+python scripts/parse.py DATASET_ID DOC_ID1 --background --output /tmp/parse-status.json --json
+python scripts/parse_status.py DATASET_ID --json
+python scripts/search.py "query"
+python scripts/search.py "query" DATASET_ID --json
+python scripts/search.py --dataset-ids DATASET_ID1,DATASET_ID2 --doc-ids DOC_ID1,DOC_ID2 "query" --json
+python scripts/search.py --retrieval-test --kb-id DATASET_ID "query" --json
 ```
 
-## Memory Management
+## Notes
 
-```bash
-# List all memories
-python scripts/memory.py list
-
-# Get memory configuration
-python scripts/memory.py config MEMORY_ID
-
-# Get messages from memory
-python scripts/memory.py messages MEMORY_ID
-
-# Search messages
-python scripts/memory.py search MEMORY_ID "search query"
-```
-
-## Chunk Management
-
-```bash
-# List chunks in document
-python scripts/chunks.py list DOC_ID
-
-# Get chunk details
-python scripts/chunks.py get CHUNK_ID
-
-# Create new chunk
-python scripts/chunks.py create DOC_ID "chunk content"
-
-# Update chunk
-python scripts/chunks.py update DOC_ID CHUNK_ID "updated content"
-
-# Delete chunks
-python scripts/chunks.py delete DOC_ID CHUNK_ID1,CHUNK_ID2
-```
-
-## API Endpoints
-
-**Retrieval:**
-- `POST /api/v1/retrieval` - Basic retrieval (no auth, uses dataset_ids)
-- `POST /api/v1/chunk/retrieval_test` - Advanced retrieval (login required, uses kb_id)
-
-**Datasets:**
-- `GET /api/v1/datasets` - List datasets
-
-**Chunks:**
-- `GET /api/v1/chunk/get` - Get chunk details
-- `POST /api/v1/chunk/create` - Create chunk
-- `POST /api/v1/chunk/set` - Update chunk
-- `POST /api/v1/chunk/switch` - Toggle availability
-- `POST /api/v1/chunk/rm` - Delete chunks
-- `POST /api/v1/chunk/list` - List chunks in document
-
-**Memory:**
-- `POST /api/v1/memories` - Create memory
-- `PUT /api/v1/memories/<id>` - Update memory
-- `DELETE /api/v1/memories/<id>` - Delete memory
-- `GET /api/v1/memories` - List memories
-- `GET /api/v1/memories/<id>/config` - Get configuration
-- `GET /api/v1/memories/<id>` - Get messages
-- `POST /api/v1/messages` - Add message
-- `DELETE /api/v1/messages/<mid>:<msgid>` - Forget message
-- `PUT /api/v1/messages/<mid>:<msgid>` - Update status
-- `GET /api/v1/messages/search` - Search messages
+- Dataset creation supports `--avatar`, `--description`, `--embedding-model`, `--permission`, `--chunk-method`, and `--language`.
+- Dataset update supports explicit flags or `--data` JSON payloads through `scripts/update_dataset.py`.
+- Upload does not start parsing by itself.
+- Prefer local file paths for uploads. Drag-and-drop is acceptable only when the client's UI supports it, and it may fail for large files.
+- Document update supports explicit flags or `--data` JSON payloads through `scripts/update_document.py`.
+- Dataset and document deletion are destructive. Require explicit target IDs.
+- Parsing is asynchronous.
+- `parse.py` returns parser status immediately after the start request; use `--watch` for periodic updates or `--background` for a detached watcher.
+- For broad status/progress requests with no dataset specified, list datasets first and aggregate `scripts/parse_status.py DATASET_ID` across all datasets.
+- If a dataset is specified, prefer `scripts/parse_status.py DATASET_ID` without `--doc-ids`.
+- If document IDs are specified, pass `--doc-ids`.
+- Summarize RUNNING files first.
+- Status reporting is derived from the dataset document list API. It does not fabricate percentage progress.
+- `--background` writes the final JSON payload to `output_path`.
+- Retrieval defaults to `POST /api/v1/retrieval`.
+- `scripts/search.py` accepts `RAGFLOW_DATASET_IDS` from `.env` as the default dataset scope when the user does not specify dataset IDs explicitly.
+- Use `--retrieval-test` only when the user wants single-dataset debugging or specifically asks for that endpoint.

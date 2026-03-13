@@ -1,249 +1,320 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-RAGFlow Knowledge Search (Python version - no jq dependency)
-Usage: python search.py [OPTIONS] "<search query>"
-"""
 
-import os
-import sys
+import argparse
 import json
-import urllib.request
-import urllib.parse
-from urllib.parse import urlencode
-import io
+import os
+from typing import Any
 
-# Fix Windows UTF-8 output
-if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+from common import (
+    ConfigError,
+    DataError,
+    ScriptError,
+    configure_stdio_utf8,
+    current_timestamp,
+    ensure_success,
+    format_json,
+    load_repo_env,
+    repo_root_from_path,
+    request_json,
+    require_api_key,
+    resolve_base_url,
+)
 
-def load_env():
-    """Load .env file from parent directory"""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    # Look in parent directory
-    env_file = os.path.join(script_dir, '..', '.env')
+DEFAULT_TOP_K = 5
+DEFAULT_THRESHOLD = 0.2
+DEFAULT_PAGE = 1
+DEFAULT_PAGE_SIZE = 30
+PREVIEW_LIMIT = 240
 
-    # Fallback to openclaw workspace
-    if not os.path.exists(env_file):
-        openclaw_env = os.path.expanduser('~/.openclaw/workspace/skills/ragflow-knowledge/.env')
-        if os.path.exists(openclaw_env):
-            env_file = openclaw_env
 
-    if not os.path.exists(env_file):
-        return {}
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Retrieve relevant chunks from RAGFlow datasets.")
+    parser.add_argument("query", help="Search query text")
+    parser.add_argument(
+        "dataset_id",
+        nargs="?",
+        help="Optional dataset ID shortcut. Used for standard retrieval, or as the fallback kb_id for --retrieval-test.",
+    )
+    parser.add_argument("--dataset-ids", help="Comma-separated dataset IDs")
+    parser.add_argument("--doc-ids", help="Comma-separated document IDs")
+    parser.add_argument("--top-k", type=int, default=DEFAULT_TOP_K, help=f"Maximum results (default: {DEFAULT_TOP_K})")
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=DEFAULT_THRESHOLD,
+        help=f"Similarity threshold in the range [0, 1] (default: {DEFAULT_THRESHOLD})",
+    )
+    parser.add_argument("--vector-weight", type=float, help="Vector similarity weight in the range [0, 1]")
+    parser.add_argument("--page", type=int, default=DEFAULT_PAGE, help=f"Page number (default: {DEFAULT_PAGE})")
+    parser.add_argument(
+        "--page-size",
+        "--size",
+        dest="page_size",
+        type=int,
+        default=DEFAULT_PAGE_SIZE,
+        help=f"Page size (default: {DEFAULT_PAGE_SIZE})",
+    )
+    parser.add_argument("--keyword", action="store_true", help="Enable keyword extraction")
+    parser.add_argument("--use-kg", action="store_true", help="Enable knowledge graph retrieval")
+    parser.add_argument("--rerank-id", help="Optional rerank model ID")
+    parser.add_argument("--search-id", help="Optional search session ID")
+    parser.add_argument("--retrieval-test", action="store_true", help="Use /api/v1/chunk/retrieval_test")
+    parser.add_argument("--kb-id", help="Dataset ID required by retrieval_test")
+    parser.add_argument("--json", action="store_true", dest="json_output", help="Print JSON output")
+    parser.add_argument(
+        "--base-url",
+        help="Base URL for the RAGFlow server (priority: --base-url > RAGFLOW_API_URL > RAGFLOW_BASE_URL > HOST_ADDRESS > default)",
+    )
+    return parser.parse_args(argv)
 
-    env_vars = {}
-    with open(env_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            if '=' in line and not line.startswith('export'):
-                key, value = line.split('=', 1)
-                # Parse JSON arrays properly
-                value = value.strip()
-                if value.startswith('[') and value.endswith(']'):
-                    try:
-                        env_vars[key.strip()] = json.loads(value)
-                    except:
-                        env_vars[key.strip()] = value
-                else:
-                    env_vars[key.strip()] = value
 
-    return env_vars
+def _validate_range(name: str, value: float, *, min_value: float = 0.0, max_value: float = 1.0) -> None:
+    if value < min_value or value > max_value:
+        raise ConfigError(f"{name} must be between {min_value} and {max_value}.")
 
-def api_request(url, api_key, body=None):
-    """Make POST API request to RAGFlow"""
-    headers = {
-        'Authorization': f'Bearer {api_key}',
-        'Content-Type': 'application/json'
-    }
 
-    data = json.dumps(body).encode('utf-8') if body else None
-    req = urllib.request.Request(url, data=data, headers=headers)
+def _parse_ids(raw_value: str, *, label: str) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for item in raw_value.split(","):
+        value = item.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        values.append(value)
+
+    if not values:
+        raise ConfigError(f"{label} must include at least one ID.")
+    return values
+
+
+def _parse_dataset_ids_env() -> list[str]:
+    raw_value = (os.getenv("RAGFLOW_DATASET_IDS") or "").strip()
+    if not raw_value:
+        return []
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            return json.loads(response.read().decode('utf-8'))
-    except urllib.error.HTTPError as e:
-        return {'code': e.code, 'data': [], 'message': str(e)}
-    except Exception as e:
-        return {'code': -1, 'data': [], 'error': str(e)}
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return _parse_ids(raw_value, label="RAGFLOW_DATASET_IDS")
 
-def search(env, query, dataset_ids=None, top_k=5, similarity_threshold=0.2,
-          vector_similarity_weight=None, page=1, size=30, doc_ids=None,
-          keyword=False, use_kg=False, rerank_id=None, search_id=None,
-          use_retrieval_test=False, kb_id=None):
-    """Search RAGFlow knowledge base"""
-    api_url = env.get('RAGFLOW_API_URL', 'http://127.0.0.1')
-    api_key = env.get('RAGFLOW_API_KEY', '')
+    if isinstance(parsed, list):
+        values: list[str] = []
+        seen: set[str] = set()
+        for item in parsed:
+            value = str(item).strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            values.append(value)
+        if not values:
+            raise ConfigError("RAGFLOW_DATASET_IDS must include at least one dataset ID when it is set.")
+        return values
 
-    if not api_key:
-        print("[Error] RAGFLOW_API_KEY not set!")
-        sys.exit(1)
+    if isinstance(parsed, str):
+        return _parse_ids(parsed, label="RAGFLOW_DATASET_IDS")
 
-    # Determine which API to use
-    if use_retrieval_test:
-        api_endpoint = f"{api_url}/api/v1/chunk/retrieval_test"
+    raise ConfigError("RAGFLOW_DATASET_IDS must be a JSON array or a comma-separated string.")
+
+
+def _resolve_dataset_ids(args: argparse.Namespace) -> list[str]:
+    if args.dataset_ids:
+        return _parse_ids(args.dataset_ids, label="--dataset-ids")
+    if args.dataset_id:
+        dataset_id = args.dataset_id.strip()
+        if not dataset_id:
+            raise ConfigError("dataset_id must not be empty.")
+        return [dataset_id]
+    return _parse_dataset_ids_env()
+
+
+def _resolve_kb_id(args: argparse.Namespace, dataset_ids: list[str]) -> str:
+    if args.kb_id:
+        kb_id = args.kb_id.strip()
         if not kb_id:
-            # Try to use first dataset_id
-            if dataset_ids and len(dataset_ids) > 0:
-                kb_id = dataset_ids[0]
-            else:
-                print("[Error] --kb-id is required for retrieval_test")
-                sys.exit(1)
-        body = {
-            'kb_id': kb_id,
-            'question': query,
-            'page': page,
-            'size': size
-        }
-        similarity_threshold = similarity_threshold or 0.0
-    else:
-        api_endpoint = f"{api_url}/api/v1/retrieval"
-        if not dataset_ids:
-            default_ids = env.get('RAGFLOW_DATASET_IDS', '[]')
-            dataset_ids = json.loads(default_ids) if default_ids else []
+            raise ConfigError("--kb-id must not be empty.")
+        return kb_id
+    if dataset_ids:
+        return dataset_ids[0]
+    raise ConfigError("--kb-id is required for --retrieval-test when no dataset ID is provided.")
 
-        body = {
-            'question': query
-        }
-        if dataset_ids:
-            body['dataset_ids'] = dataset_ids
 
-    # Add optional parameters
-    body['top_k'] = top_k
-    body['similarity_threshold'] = similarity_threshold
-    body['page'] = page
-    body['size'] = size
+def _normalize_content(chunk: dict[str, Any]) -> str:
+    for key in ("content_with_weight", "content", "answer", "chunk"):
+        value = chunk.get(key)
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            return " ".join(str(item) for item in value)
+    return ""
 
-    if vector_similarity_weight is not None:
-        body['vector_similarity_weight'] = vector_similarity_weight
+
+def _normalize_chunk(chunk: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "document_name": chunk.get("document_keyword") or chunk.get("docnm_kwd") or chunk.get("document_name"),
+        "document_id": chunk.get("document_id") or chunk.get("doc_id"),
+        "dataset_id": chunk.get("dataset_id") or chunk.get("kb_id"),
+        "chunk_id": chunk.get("chunk_id") or chunk.get("id"),
+        "similarity": chunk.get("similarity"),
+        "vector_similarity": chunk.get("vector_similarity"),
+        "term_similarity": chunk.get("term_similarity"),
+        "positions": chunk.get("positions"),
+        "content": _normalize_content(chunk),
+    }
+
+
+def _extract_chunks(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    data = payload.get("data")
+    if data is None:
+        return []
+    if isinstance(data, dict):
+        chunks = data.get("chunks")
+        if chunks is None:
+            return []
+        if not isinstance(chunks, list):
+            raise DataError("Retrieval response data.chunks must be a list.")
+        return [_normalize_chunk(chunk) for chunk in chunks if isinstance(chunk, dict)]
+    if isinstance(data, list):
+        return [_normalize_chunk(chunk) for chunk in data if isinstance(chunk, dict)]
+    raise DataError("Retrieval response data must be an object or array.")
+
+
+def search(args: argparse.Namespace, *, base_url: str, api_key: str) -> dict[str, Any]:
+    if args.top_k <= 0:
+        raise ConfigError("--top-k must be greater than 0.")
+    if args.page <= 0:
+        raise ConfigError("--page must be greater than 0.")
+    if args.page_size <= 0:
+        raise ConfigError("--page-size must be greater than 0.")
+    _validate_range("--threshold", args.threshold)
+    if args.vector_weight is not None:
+        _validate_range("--vector-weight", args.vector_weight)
+
+    dataset_ids = _resolve_dataset_ids(args)
+    doc_ids = _parse_ids(args.doc_ids, label="--doc-ids") if args.doc_ids else []
+
+    body: dict[str, Any] = {
+        "question": args.query,
+        "top_k": args.top_k,
+        "similarity_threshold": args.threshold,
+        "page": args.page,
+        "size": args.page_size,
+    }
+    if args.vector_weight is not None:
+        body["vector_similarity_weight"] = args.vector_weight
     if doc_ids:
-        body['doc_ids'] = doc_ids
-    if keyword:
-        body['keyword'] = True
-    if use_kg:
-        body['use_kg'] = True
-    if rerank_id:
-        body['rerank_id'] = rerank_id
-    if search_id:
-        body['search_id'] = search_id
+        body["doc_ids"] = doc_ids
+    if args.keyword:
+        body["keyword"] = True
+    if args.use_kg:
+        body["use_kg"] = True
+    if args.rerank_id:
+        body["rerank_id"] = args.rerank_id
+    if args.search_id:
+        body["search_id"] = args.search_id
 
-    print(f"[Search] Query: {query}")
-    if use_retrieval_test:
-        print(f"[Search] Using: retrieval_test API (requires login)")
-        print(f"[Search] KB ID: {kb_id}")
+    api_name = "retrieval"
+    kb_id: str | None = None
+    if args.retrieval_test:
+        api_name = "retrieval_test"
+        kb_id = _resolve_kb_id(args, dataset_ids)
+        body["kb_id"] = kb_id
+        api_endpoint = f"{base_url}/api/v1/chunk/retrieval_test"
+    else:
+        if dataset_ids:
+            body["dataset_ids"] = dataset_ids
+        api_endpoint = f"{base_url}/api/v1/retrieval"
 
-    result = api_request(api_endpoint, api_key, body)
+    payload = ensure_success(
+        request_json(
+            api_endpoint,
+            api_key,
+            method="POST",
+            body=json.dumps(body).encode("utf-8"),
+            content_type="application/json",
+        )
+    )
+    chunks = _extract_chunks(payload)
 
-    if result.get('code') != 0:
-        print(f"[Error] API Error: {result.get('code', 'unknown')}")
-        if 'error' in result:
-            print(f"   {result['error']}")
-        if 'message' in result:
-            print(f"   {result['message']}")
-        return
+    return {
+        "checked_at": current_timestamp(),
+        "query": args.query,
+        "api": api_name,
+        "dataset_ids": dataset_ids,
+        "kb_id": kb_id,
+        "doc_ids": doc_ids,
+        "count": len(chunks),
+        "chunks": chunks,
+    }
 
-    chunks = result.get('data', {}).get('chunks', [])
 
-    if not chunks:
-        print("[Result] No results found")
-        return
+def _format_similarity(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return f"{value:.2%}"
+    return "unknown"
 
-    print(f"\n[Result] Found {len(chunks)} result(s):\n")
 
-    for i, chunk in enumerate(chunks, 1):
-        similarity = chunk.get('similarity', 0) * 100
-        doc = chunk.get('document_keyword', chunk.get('docnm_kwd', 'Unknown'))
-        content = chunk.get('content', '')[:200]
+def _format_preview(content: str) -> str:
+    compact = " ".join(content.split())
+    if not compact:
+        return "unknown"
+    if len(compact) <= PREVIEW_LIMIT:
+        return compact
+    return f"{compact[: PREVIEW_LIMIT - 3]}..."
 
-        print(f"[{i}] {doc}")
-        print(f"    Similarity: {similarity:.0f}%")
-        print(f"    Content: {content}...")
-        print()
 
-def main():
-    env = load_env()
+def _format_text(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Checked at: {payload['checked_at']}",
+        f"Query: {payload['query']}",
+        f"API: {payload['api']}",
+        f"Results: {payload['count']}",
+    ]
+    if payload["dataset_ids"]:
+        lines.append(f"Dataset IDs: {', '.join(payload['dataset_ids'])}")
+    if payload.get("kb_id"):
+        lines.append(f"KB ID: {payload['kb_id']}")
+    if payload["doc_ids"]:
+        lines.append(f"Document IDs: {', '.join(payload['doc_ids'])}")
 
-    if len(sys.argv) < 2:
-        print("RAGFlow Knowledge Search (Python version)")
-        print("\nUsage: python search.py [OPTIONS] \"<search query>\"")
-        print("\nOptions:")
-        print("  --top-k N               Maximum results (default: 5)")
-        print("  --threshold N           Similarity 0-1 (default: 0.2)")
-        print("  --vector-weight N       Vector weight 0-1 (default: 0.3)")
-        print("  --dataset-ids \"id1,id2\"  Specific datasets")
-        print("  --kb-id ID              Dataset for retrieval_test")
-        print("  --doc-ids \"id1,id2\"      Limit to documents")
-        print("  --keyword               Enable keyword extraction")
-        print("  --use-kg                Use knowledge graph")
-        print("  --retrieval-test         Use retrieval_test API")
-        print("\nExamples:")
-        print("  python search.py \"your query\"")
-        print("  python search.py --top-k 10 --threshold 0.3 \"your query\"")
-        print("  python search.py --retrieval-test --kb-id DATASET_ID \"query\"")
-        return
+    if payload["count"] == 0:
+        lines.append("No results found.")
+        return "\n".join(lines)
 
-    query = sys.argv[-1]
-    dataset_ids = None
-    top_k = 5
-    similarity_threshold = 0.2
-    vector_weight = None
-    page = 1
-    size = 30
-    doc_ids = None
-    keyword = False
-    use_kg = False
-    rerank_id = None
-    search_id = None
-    use_retrieval_test = False
-    kb_id = None
+    for index, chunk in enumerate(payload["chunks"], start=1):
+        lines.extend(
+            [
+                "",
+                f"[{index}] {chunk.get('document_name') or 'unknown'}",
+                f"  similarity: {_format_similarity(chunk.get('similarity'))}",
+                f"  document_id: {chunk.get('document_id') or 'unknown'}",
+                f"  dataset_id: {chunk.get('dataset_id') or 'unknown'}",
+                f"  chunk_id: {chunk.get('chunk_id') or 'unknown'}",
+                f"  content: {_format_preview(chunk.get('content') or '')}",
+            ]
+        )
+    return "\n".join(lines)
 
-    i = 1
-    while i < len(sys.argv) - 1:
-        arg = sys.argv[i]
-        if arg == '--top-k' and i + 1 < len(sys.argv):
-            top_k = int(sys.argv[i + 1])
-            i += 2
-        elif arg == '--threshold' and i + 1 < len(sys.argv):
-            similarity_threshold = float(sys.argv[i + 1])
-            i += 2
-        elif arg == '--vector-weight' and i + 1 < len(sys.argv):
-            vector_weight = float(sys.argv[i + 1])
-            i += 2
-        elif arg == '--dataset-ids' and i + 1 < len(sys.argv):
-            ids = sys.argv[i + 1].split(',')
-            dataset_ids = ids
-            i += 2
-        elif arg == '--kb-id' and i + 1 < len(sys.argv):
-            kb_id = sys.argv[i + 1]
-            i += 2
-        elif arg == '--doc-ids' and i + 1 < len(sys.argv):
-            doc_ids = sys.argv[i + 1].split(',')
-            i += 2
-        elif arg == '--keyword':
-            keyword = True
-            i += 1
-        elif arg == '--use-kg':
-            use_kg = True
-            i += 1
-        elif arg == '--rerank' and i + 1 < len(sys.argv):
-            rerank_id = sys.argv[i + 1]
-            i += 2
-        elif arg == '--search-id' and i + 1 < len(sys.argv):
-            search_id = sys.argv[i + 1]
-            i += 2
-        elif arg == '--retrieval-test':
-            use_retrieval_test = True
-            i += 1
+
+def main(argv: list[str] | None = None) -> int:
+    configure_stdio_utf8()
+    load_repo_env(repo_root_from_path(__file__))
+    args = _parse_args(argv)
+
+    try:
+        base_url = resolve_base_url(args.base_url)
+        api_key = require_api_key()
+        payload = search(args, base_url=base_url, api_key=api_key)
+        print(format_json(payload) if args.json_output else _format_text(payload))
+        return 0
+    except ScriptError as exc:
+        if args.json_output:
+            print(format_json({"checked_at": current_timestamp(), "error": str(exc)}))
         else:
-            i += 1
+            print(f"Error: {exc}")
+        return 1
 
-    search(env, query, dataset_ids, top_k, similarity_threshold, vector_weight,
-          page, size, doc_ids, keyword, use_kg, rerank_id, search_id,
-          use_retrieval_test, kb_id)
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    raise SystemExit(main())

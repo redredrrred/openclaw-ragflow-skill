@@ -1,142 +1,374 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-RAGFlow Document Upload
-Upload documents to RAGFlow using session cookie from browser
-"""
 
+import argparse
+import json
+import mimetypes
 import os
 import sys
-import json
+import urllib.parse
+import urllib.error
 import urllib.request
-import io
+import uuid
+from pathlib import Path
+from typing import Any
 
-# Fix Windows UTF-8 output
-if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+from common import (
+    ApiError,
+    ConfigError,
+    DataError,
+    ScriptError,
+    configure_stdio_utf8,
+    current_timestamp,
+    decode_json_response,
+    ensure_success,
+    extract_error_message,
+    format_json,
+    load_repo_env,
+    repo_root_from_path,
+    request_json,
+    require_api_key,
+    resolve_base_url,
+)
 
-def load_env():
-    """Load .env file from parent directory"""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    env_file = os.path.join(script_dir, '..', '.env')
 
-    if not os.path.exists(env_file):
-        openclaw_env = os.path.expanduser('~/.openclaw/workspace/skills/ragflow-knowledge/.env')
-        if os.path.exists(openclaw_env):
-            env_file = openclaw_env
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    argv = list(argv) if argv is not None else sys.argv[1:]
 
-    if not os.path.exists(env_file):
-        return {}
+    if argv and argv[0] in {"list", "delete"}:
+        parser = argparse.ArgumentParser(description="Upload or delete documents in a RAGFlow dataset.")
+        parser.add_argument("command", choices=("list", "delete"))
+        parser.add_argument("dataset_id", help="Dataset ID")
+        if argv[0] == "list":
+            parser.add_argument("--page", type=int, default=1, help="Page number (default: 1)")
+            parser.add_argument("--page-size", type=int, default=100, help="Page size (default: 100)")
+        else:
+            parser.add_argument(
+                "--ids",
+                required=True,
+                help="Comma-separated document IDs, for example: id_1,id_2",
+            )
+        parser.add_argument("--json", action="store_true", dest="json_output", help="Print JSON output")
+        parser.add_argument(
+            "--base-url",
+            help="Base URL for the RAGFlow server (priority: --base-url > RAGFLOW_API_URL > RAGFLOW_BASE_URL > HOST_ADDRESS > default)",
+        )
+        return parser.parse_args(argv)
 
-    env_vars = {}
-    with open(env_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            if '=' in line and not line.startswith('export'):
-                key, value = line.split('=', 1)
-                value = value.strip()
-                if value.startswith('[') and value.endswith(']'):
-                    try:
-                        env_vars[key.strip()] = json.loads(value)
-                    except:
-                        env_vars[key.strip()] = value
-                else:
-                    env_vars[key.strip()] = value
+    parser = argparse.ArgumentParser(description="Upload or delete documents in a RAGFlow dataset.")
+    parser.set_defaults(command="upload")
+    parser.add_argument("dataset_id", help="Dataset ID")
+    parser.add_argument("files", nargs="+", help="File paths to upload")
+    parser.add_argument("--json", action="store_true", dest="json_output", help="Print JSON output")
+    parser.add_argument(
+        "--base-url",
+        help="Base URL for the RAGFlow server (priority: --base-url > RAGFLOW_API_URL > RAGFLOW_BASE_URL > HOST_ADDRESS > default)",
+    )
+    return parser.parse_args(argv)
 
-    return env_vars
 
-def upload_document(session_cookie, dataset_id, file_path):
-    """Upload document to RAGFlow using session cookie"""
-    api_url = os.getenv('RAGFLOW_API_URL', 'http://127.0.0.1')
+def _build_multipart(file_paths: list[str]) -> tuple[str, bytes]:
+    boundary = "----OpenClawBoundary" + uuid.uuid4().hex
+    body = bytearray()
 
-    if not os.path.exists(file_path):
-        print(f"[Error] File not found: {file_path}")
-        return False
+    for file_path in file_paths:
+        filename = os.path.basename(file_path)
+        mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        with open(file_path, "rb") as file_obj:
+            content = file_obj.read()
 
-    filename = os.path.basename(file_path)
+        body.extend(f"--{boundary}\r\n".encode())
+        body.extend(
+            f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode()
+        )
+        body.extend(f"Content-Type: {mime}\r\n\r\n".encode())
+        body.extend(content)
+        body.extend(b"\r\n")
 
-    # Read file content
-    with open(file_path, 'rb') as f:
-        file_content = f.read()
+    body.extend(f"--{boundary}--\r\n".encode())
+    return boundary, bytes(body)
 
-    # Create multipart/form-data boundary
-    boundary = '----WebKitFormBoundary' + os.urandom(16).hex()
 
-    # Build request body
-    body = (
-        f'------{boundary}\r\n'
-        f'Content-Disposition: form-data; name="kb_id"\r\n\r\n'
-        f'{dataset_id}\r\n'
-        f'------{boundary}\r\n'
-        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
-        f'Content-Type: application/octet-stream\r\n\r\n'
-    ).encode('utf-8')
+def _normalize_document(document: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": document.get("id"),
+        "name": document.get("name"),
+        "dataset_id": document.get("dataset_id"),
+        "run": document.get("run"),
+        "chunk_method": document.get("chunk_method"),
+        "chunk_count": document.get("chunk_count"),
+        "token_count": document.get("token_count"),
+        "created_at": document.get("created_at"),
+    }
 
-    body += file_content
-    body += f'\r\n------{boundary}--\r\n'.encode('utf-8')
 
-    # Make request
-    url = f"{api_url}/api/v1/document/upload"
-    req = urllib.request.Request(url, data=body, method='POST')
+def _parse_ids(raw_value: str) -> list[str]:
+    ids: list[str] = []
+    seen: set[str] = set()
 
-    # Set headers
-    req.add_header('Content-Type', f'multipart/form-data; boundary=----{boundary}')
-    req.add_header('Cookie', session_cookie)
+    for item in raw_value.split(","):
+        value = item.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ids.append(value)
+
+    if not ids:
+        raise ConfigError("--ids must include at least one document ID.")
+    return ids
+
+
+def _validate_positive(name: str, value: int) -> None:
+    if value <= 0:
+        raise ConfigError(f"{name} must be greater than 0.")
+
+
+def upload_documents(dataset_id: str, file_paths: list[str], *, base_url: str, api_key: str) -> dict[str, Any]:
+    missing = [path for path in file_paths if not Path(path).exists()]
+    if missing:
+        raise ConfigError("File(s) not found: " + ", ".join(missing))
+
+    boundary, body = _build_multipart(file_paths)
+    url = f"{base_url}/api/v1/datasets/{dataset_id}/documents"
+    request_obj = urllib.request.Request(url, data=body, method="POST")
+    request_obj.add_header("Authorization", f"Bearer {api_key}")
+    request_obj.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            if result.get('code') == 0:
-                print(f"[OK] File uploaded successfully!")
-                print(f"     Result: {result.get('data', [])}")
-                return True
+        with urllib.request.urlopen(request_obj, timeout=120) as response:
+            payload = decode_json_response(response.read())
+    except urllib.error.HTTPError as exc:
+        message = extract_error_message(exc.read())
+        if message:
+            raise ApiError(message) from None
+        raise ApiError(f"HTTP request failed with status {exc.code}.") from None
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", exc)
+        raise ApiError(f"Upload failed: {reason}") from None
+
+    ensure_success(payload)
+    raw_documents = payload.get("data")
+    if not isinstance(raw_documents, list):
+        raise ScriptError("Upload response missing data list.")
+
+    documents = [_normalize_document(document) for document in raw_documents]
+    return {
+        "dataset_id": dataset_id,
+        "uploaded_at": current_timestamp(),
+        "uploaded_count": len(documents),
+        "document_ids": [document["id"] for document in documents if isinstance(document.get("id"), str)],
+        "documents": documents,
+    }
+
+
+def list_documents(
+    dataset_id: str,
+    *,
+    page: int,
+    page_size: int,
+    base_url: str,
+    api_key: str,
+) -> dict[str, Any]:
+    normalized_dataset_id = dataset_id.strip()
+    if not normalized_dataset_id:
+        raise ConfigError("dataset_id must not be empty.")
+    _validate_positive("--page", page)
+    _validate_positive("--page-size", page_size)
+
+    encoded_dataset_id = urllib.parse.quote(normalized_dataset_id, safe="")
+    query = urllib.parse.urlencode({"page": page, "page_size": page_size})
+    payload = ensure_success(
+        request_json(
+            f"{base_url}/api/v1/datasets/{encoded_dataset_id}/documents?{query}",
+            api_key,
+        )
+    )
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise DataError("Document list response missing data object.")
+    raw_documents = data.get("docs")
+    total = data.get("total")
+    if not isinstance(raw_documents, list):
+        raise DataError("Document list response missing data.docs.")
+    if not isinstance(total, int):
+        raise DataError("Document list response missing data.total.")
+
+    documents = [_normalize_document(document) for document in raw_documents]
+    return {
+        "dataset_id": normalized_dataset_id,
+        "checked_at": current_timestamp(),
+        "page": page,
+        "page_size": page_size,
+        "count": len(documents),
+        "total": total,
+        "documents": documents,
+    }
+
+
+def delete_documents(dataset_id: str, raw_ids: str, *, base_url: str, api_key: str) -> dict[str, Any]:
+    normalized_dataset_id = dataset_id.strip()
+    if not normalized_dataset_id:
+        raise ConfigError("dataset_id must not be empty.")
+
+    document_ids = _parse_ids(raw_ids)
+    encoded_dataset_id = urllib.parse.quote(normalized_dataset_id, safe="")
+    payload = ensure_success(
+        request_json(
+            f"{base_url}/api/v1/datasets/{encoded_dataset_id}/documents",
+            api_key,
+            method="DELETE",
+            body=format_json({"ids": document_ids}).encode("utf-8"),
+            content_type="application/json",
+        )
+    )
+    return {
+        "dataset_id": normalized_dataset_id,
+        "deleted_at": current_timestamp(),
+        "deleted_count": len(document_ids),
+        "document_ids": document_ids,
+        "message": payload.get("message", ""),
+        "data": payload.get("data"),
+    }
+
+
+def _format_text(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Dataset: {payload['dataset_id']}",
+        f"Uploaded at: {payload['uploaded_at']}",
+        f"Uploaded: {payload['uploaded_count']} document(s)",
+    ]
+
+    for document in payload["documents"]:
+        lines.extend(
+            [
+                "",
+                f"- {document.get('name') or 'unknown'}",
+                f"  id: {document.get('id') or 'unknown'}",
+                f"  run: {document.get('run') or 'unknown'}",
+                f"  chunk_method: {document.get('chunk_method') or 'unknown'}",
+            ]
+        )
+
+    if payload["document_ids"]:
+        lines.extend(
+            [
+                "",
+                "Next:",
+                f"python scripts/parse.py {payload['dataset_id']} {' '.join(payload['document_ids'])}",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _format_delete_text(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Dataset: {payload['dataset_id']}",
+        f"Deleted at: {payload['deleted_at']}",
+        f"Deleted: {payload['deleted_count']} document(s)",
+        f"IDs: {', '.join(payload['document_ids'])}",
+    ]
+    message = payload.get("message")
+    if isinstance(message, str) and message.strip():
+        lines.append(f"Message: {message.strip()}")
+    return "\n".join(lines)
+
+
+def _format_list_text(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Dataset: {payload['dataset_id']}",
+        f"Checked at: {payload['checked_at']}",
+        f"Documents: {payload['count']} / total={payload['total']}",
+        f"Page: {payload['page']}",
+        f"Page size: {payload['page_size']}",
+    ]
+    for document in payload["documents"]:
+        lines.extend(
+            [
+                "",
+                f"- {document.get('name') or 'unknown'}",
+                f"  id: {document.get('id') or 'unknown'}",
+                f"  run: {document.get('run') or 'unknown'}",
+                f"  chunk_method: {document.get('chunk_method') or 'unknown'}",
+                f"  chunks: {document.get('chunk_count') if document.get('chunk_count') is not None else 'unknown'}",
+                f"  tokens: {document.get('token_count') if document.get('token_count') is not None else 'unknown'}",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    configure_stdio_utf8()
+    load_repo_env(repo_root_from_path(__file__))
+    args = _parse_args(argv)
+
+    try:
+        base_url = resolve_base_url(args.base_url)
+        api_key = require_api_key()
+        if args.command == "list":
+            payload = list_documents(
+                args.dataset_id,
+                page=args.page,
+                page_size=args.page_size,
+                base_url=base_url,
+                api_key=api_key,
+            )
+            print(format_json(payload) if args.json_output else _format_list_text(payload))
+            return 0
+
+        if args.command == "delete":
+            payload = delete_documents(args.dataset_id, args.ids, base_url=base_url, api_key=api_key)
+            print(format_json(payload) if args.json_output else _format_delete_text(payload))
+            return 0
+
+        payload = upload_documents(
+            args.dataset_id,
+            args.files,
+            base_url=base_url,
+            api_key=api_key,
+        )
+        print(format_json(payload) if args.json_output else _format_text(payload))
+        return 0
+    except ScriptError as exc:
+        if args.json_output:
+            error_payload = {
+                "dataset_id": getattr(args, "dataset_id", ""),
+                "error": str(exc),
+            }
+            if getattr(args, "command", "upload") == "delete":
+                error_payload.update(
+                    {
+                        "deleted_at": current_timestamp(),
+                        "deleted_count": 0,
+                        "document_ids": [],
+                    }
+                )
+            elif getattr(args, "command", "upload") == "list":
+                error_payload.update(
+                    {
+                        "checked_at": current_timestamp(),
+                        "page": getattr(args, "page", 1),
+                        "page_size": getattr(args, "page_size", 100),
+                        "count": 0,
+                        "total": 0,
+                        "documents": [],
+                    }
+                )
             else:
-                print(f"[Error] Upload failed: {result.get('message', 'Unknown error')}")
-                return False
-    except urllib.error.HTTPError as e:
-        print(f"[Error] HTTP Error {e.code}: {e.reason}")
-        return False
-    except Exception as e:
-        print(f"[Error] Upload failed: {e}")
-        return False
+                error_payload.update(
+                    {
+                        "uploaded_at": current_timestamp(),
+                        "uploaded_count": 0,
+                        "document_ids": [],
+                        "documents": [],
+                    }
+                )
+            print(
+                format_json(error_payload)
+            )
+        else:
+            print(f"Error: {exc}")
+        return 1
 
-def main():
-    if len(sys.argv) < 3:
-        print("RAGFlow Document Upload (requires browser session)")
-        print("")
-        print("Usage: python upload.py <dataset_id> <file_path>")
-        print("")
-        print("Get session cookie from browser:")
-        print("1. Login to RAGFlow in your browser")
-        print("2. Open Developer Tools (F12)")
-        print("3. Go to Application > Cookies")
-        print("4. Find the session cookie (usually 'session' or 'user_session')")
-        print("5. Copy the cookie value")
-        print("")
-        print("Set environment variable:")
-        echo "export RAGFLOW_SESSION_COOKIE='your-cookie-here'"
-        return
 
-    dataset_id = sys.argv[1]
-    file_path = sys.argv[2]
-
-    # Get session cookie from environment
-    session_cookie = os.getenv('RAGFLOW_SESSION_COOKIE')
-
-    if not session_cookie:
-        print("[Error] RAGFLOW_SESSION_COOKIE not set!")
-        print("")
-        print("Please set it:")
-        print("  export RAGFLOW_SESSION_COOKIE='your-cookie-here'")
-        print("")
-        print("Or add to .env file:")
-        print("  RAGFLOW_SESSION_COOKIE=your-cookie-here")
-        sys.exit(1)
-
-    upload_document(session_cookie, dataset_id, file_path)
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    raise SystemExit(main())

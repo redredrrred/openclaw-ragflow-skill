@@ -1,0 +1,4 @@
+interface:
+  display_name: "RAGFlow Dataset Manage"
+  short_description: "Create, inspect, and delete RAGFlow datasets"
+  default_prompt: "Use $ragflow-dataset-manage to create, list, inspect, or delete datasets in RAGFlow."
