@@ -104,7 +104,10 @@ def search(env, query, dataset_ids=None, top_k=5, similarity_threshold=0.2,
         api_endpoint = f"{api_url}/api/v1/retrieval"
         if not dataset_ids:
             default_ids = env.get('RAGFLOW_DATASET_IDS', '[]')
-            dataset_ids = json.loads(default_ids) if default_ids else []
+            if isinstance(default_ids, str):
+                dataset_ids = json.loads(default_ids) if default_ids else []
+            else:
+                dataset_ids = default_ids if default_ids else []
 
         body = {
             'question': query

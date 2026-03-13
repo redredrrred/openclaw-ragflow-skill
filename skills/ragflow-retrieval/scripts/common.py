@@ -53,7 +53,7 @@ def configure_stdio_utf8() -> None:
 
 
 def repo_root_from_path(file_path: str) -> Path:
-    return Path(file_path).resolve().parents[1]
+    return Path(file_path).resolve().parents[3]
 
 
 def load_repo_env(repo_root: Path) -> None:
