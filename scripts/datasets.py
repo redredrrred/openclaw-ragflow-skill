@@ -55,6 +55,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     create_parser.add_argument("--language", help="Dataset language")
     create_parser.set_defaults(command="create")
 
+    delete_parser = subparsers.add_parser("delete", help="Delete datasets", parents=[global_parser])
+    delete_parser.add_argument(
+        "--ids",
+        required=True,
+        help="Comma-separated dataset IDs, for example: id_1,id_2",
+    )
+    delete_parser.set_defaults(command="delete")
+
     args = parser.parse_args(argv)
     if not args.command:
         args.command = "list"
@@ -121,6 +129,22 @@ def _build_create_payload(args: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
+def _parse_ids(raw_value: str, *, label: str) -> list[str]:
+    ids: list[str] = []
+    seen: set[str] = set()
+
+    for item in raw_value.split(","):
+        value = item.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ids.append(value)
+
+    if not ids:
+        raise DataError(f"{label} must include at least one ID.")
+    return ids
+
+
 def create_dataset(args: argparse.Namespace, *, base_url: str, api_key: str) -> dict[str, Any]:
     payload = ensure_success(
         request_json(
@@ -137,6 +161,25 @@ def create_dataset(args: argparse.Namespace, *, base_url: str, api_key: str) -> 
     return {
         "created_at": current_timestamp(),
         "dataset": _normalize_dataset(dataset),
+    }
+
+
+def delete_datasets(raw_ids: str, *, base_url: str, api_key: str) -> dict[str, Any]:
+    dataset_ids = _parse_ids(raw_ids, label="--ids")
+    payload = ensure_success(
+        request_json(
+            f"{base_url}/api/v1/datasets",
+            api_key,
+            method="DELETE",
+            body=json.dumps({"ids": dataset_ids}).encode("utf-8"),
+            content_type="application/json",
+        )
+    )
+    return {
+        "deleted_at": current_timestamp(),
+        "dataset_ids": dataset_ids,
+        "message": payload.get("message", ""),
+        "data": payload.get("data"),
     }
 
 
@@ -196,6 +239,17 @@ def _format_create(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_delete(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Deleted at: {payload['deleted_at']}",
+        f"Datasets: {', '.join(payload['dataset_ids'])}",
+    ]
+    message = payload.get("message")
+    if isinstance(message, str) and message.strip():
+        lines.append(f"Message: {message.strip()}")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     configure_stdio_utf8()
     load_repo_env(repo_root_from_path(__file__))
@@ -218,6 +272,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "create":
             payload = create_dataset(args, base_url=base_url, api_key=api_key)
             print(format_json(payload) if args.json_output else _format_create(payload))
+            return 0
+
+        if args.command == "delete":
+            payload = delete_datasets(args.ids, base_url=base_url, api_key=api_key)
+            print(format_json(payload) if args.json_output else _format_delete(payload))
             return 0
 
         raise DataError(f"Unsupported command: {args.command}")

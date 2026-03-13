@@ -1,4 +1,4 @@
 interface:
   display_name: "RAGFlow Dataset Upload"
-  short_description: "Upload documents into a RAGFlow dataset"
-  default_prompt: "Use $ragflow-dataset-upload to list datasets and upload documents into a RAGFlow dataset."
+  short_description: "Upload or delete documents in a dataset"
+  default_prompt: "Use $ragflow-dataset-upload to list datasets, upload documents into a dataset, or delete documents from a dataset."

@@ -1,4 +1,4 @@
 interface:
   display_name: "RAGFlow Dataset Ingest"
-  short_description: "Create datasets, upload docs, and track parsing"
-  default_prompt: "Use $ragflow-dataset-ingest to create or inspect datasets, upload documents, start parsing, and monitor parser status in RAGFlow."
+  short_description: "Manage datasets, manage docs, and track parsing"
+  default_prompt: "Use $ragflow-dataset-ingest to create, inspect, or delete datasets, upload or delete documents, start parsing, and monitor parser status in RAGFlow."

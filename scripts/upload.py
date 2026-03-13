@@ -2,8 +2,11 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import json
 import mimetypes
 import os
+import sys
+import urllib.parse
 import urllib.error
 import urllib.request
 import uuid
@@ -13,6 +16,7 @@ from typing import Any
 from common import (
     ApiError,
     ConfigError,
+    DataError,
     ScriptError,
     configure_stdio_utf8,
     current_timestamp,
@@ -22,13 +26,37 @@ from common import (
     format_json,
     load_repo_env,
     repo_root_from_path,
+    request_json,
     require_api_key,
     resolve_base_url,
 )
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Upload one or more documents to a RAGFlow dataset.")
+    argv = list(argv) if argv is not None else sys.argv[1:]
+
+    if argv and argv[0] in {"list", "delete"}:
+        parser = argparse.ArgumentParser(description="Upload or delete documents in a RAGFlow dataset.")
+        parser.add_argument("command", choices=("list", "delete"))
+        parser.add_argument("dataset_id", help="Dataset ID")
+        if argv[0] == "list":
+            parser.add_argument("--page", type=int, default=1, help="Page number (default: 1)")
+            parser.add_argument("--page-size", type=int, default=100, help="Page size (default: 100)")
+        else:
+            parser.add_argument(
+                "--ids",
+                required=True,
+                help="Comma-separated document IDs, for example: id_1,id_2",
+            )
+        parser.add_argument("--json", action="store_true", dest="json_output", help="Print JSON output")
+        parser.add_argument(
+            "--base-url",
+            help="Base URL for the RAGFlow server (priority: --base-url > RAGFLOW_API_URL > RAGFLOW_BASE_URL > HOST_ADDRESS > default)",
+        )
+        return parser.parse_args(argv)
+
+    parser = argparse.ArgumentParser(description="Upload or delete documents in a RAGFlow dataset.")
+    parser.set_defaults(command="upload")
     parser.add_argument("dataset_id", help="Dataset ID")
     parser.add_argument("files", nargs="+", help="File paths to upload")
     parser.add_argument("--json", action="store_true", dest="json_output", help="Print JSON output")
@@ -68,7 +96,31 @@ def _normalize_document(document: dict[str, Any]) -> dict[str, Any]:
         "dataset_id": document.get("dataset_id"),
         "run": document.get("run"),
         "chunk_method": document.get("chunk_method"),
+        "chunk_count": document.get("chunk_count"),
+        "token_count": document.get("token_count"),
+        "created_at": document.get("created_at"),
     }
+
+
+def _parse_ids(raw_value: str) -> list[str]:
+    ids: list[str] = []
+    seen: set[str] = set()
+
+    for item in raw_value.split(","):
+        value = item.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ids.append(value)
+
+    if not ids:
+        raise ConfigError("--ids must include at least one document ID.")
+    return ids
+
+
+def _validate_positive(name: str, value: int) -> None:
+    if value <= 0:
+        raise ConfigError(f"{name} must be greater than 0.")
 
 
 def upload_documents(dataset_id: str, file_paths: list[str], *, base_url: str, api_key: str) -> dict[str, Any]:
@@ -109,6 +161,76 @@ def upload_documents(dataset_id: str, file_paths: list[str], *, base_url: str, a
     }
 
 
+def list_documents(
+    dataset_id: str,
+    *,
+    page: int,
+    page_size: int,
+    base_url: str,
+    api_key: str,
+) -> dict[str, Any]:
+    normalized_dataset_id = dataset_id.strip()
+    if not normalized_dataset_id:
+        raise ConfigError("dataset_id must not be empty.")
+    _validate_positive("--page", page)
+    _validate_positive("--page-size", page_size)
+
+    encoded_dataset_id = urllib.parse.quote(normalized_dataset_id, safe="")
+    query = urllib.parse.urlencode({"page": page, "page_size": page_size})
+    payload = ensure_success(
+        request_json(
+            f"{base_url}/api/v1/datasets/{encoded_dataset_id}/documents?{query}",
+            api_key,
+        )
+    )
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise DataError("Document list response missing data object.")
+    raw_documents = data.get("docs")
+    total = data.get("total")
+    if not isinstance(raw_documents, list):
+        raise DataError("Document list response missing data.docs.")
+    if not isinstance(total, int):
+        raise DataError("Document list response missing data.total.")
+
+    documents = [_normalize_document(document) for document in raw_documents]
+    return {
+        "dataset_id": normalized_dataset_id,
+        "checked_at": current_timestamp(),
+        "page": page,
+        "page_size": page_size,
+        "count": len(documents),
+        "total": total,
+        "documents": documents,
+    }
+
+
+def delete_documents(dataset_id: str, raw_ids: str, *, base_url: str, api_key: str) -> dict[str, Any]:
+    normalized_dataset_id = dataset_id.strip()
+    if not normalized_dataset_id:
+        raise ConfigError("dataset_id must not be empty.")
+
+    document_ids = _parse_ids(raw_ids)
+    encoded_dataset_id = urllib.parse.quote(normalized_dataset_id, safe="")
+    payload = ensure_success(
+        request_json(
+            f"{base_url}/api/v1/datasets/{encoded_dataset_id}/documents",
+            api_key,
+            method="DELETE",
+            body=format_json({"ids": document_ids}).encode("utf-8"),
+            content_type="application/json",
+        )
+    )
+    return {
+        "dataset_id": normalized_dataset_id,
+        "deleted_at": current_timestamp(),
+        "deleted_count": len(document_ids),
+        "document_ids": document_ids,
+        "message": payload.get("message", ""),
+        "data": payload.get("data"),
+    }
+
+
 def _format_text(payload: dict[str, Any]) -> str:
     lines = [
         f"Dataset: {payload['dataset_id']}",
@@ -138,33 +260,110 @@ def _format_text(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_delete_text(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Dataset: {payload['dataset_id']}",
+        f"Deleted at: {payload['deleted_at']}",
+        f"Deleted: {payload['deleted_count']} document(s)",
+        f"IDs: {', '.join(payload['document_ids'])}",
+    ]
+    message = payload.get("message")
+    if isinstance(message, str) and message.strip():
+        lines.append(f"Message: {message.strip()}")
+    return "\n".join(lines)
+
+
+def _format_list_text(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Dataset: {payload['dataset_id']}",
+        f"Checked at: {payload['checked_at']}",
+        f"Documents: {payload['count']} / total={payload['total']}",
+        f"Page: {payload['page']}",
+        f"Page size: {payload['page_size']}",
+    ]
+    for document in payload["documents"]:
+        lines.extend(
+            [
+                "",
+                f"- {document.get('name') or 'unknown'}",
+                f"  id: {document.get('id') or 'unknown'}",
+                f"  run: {document.get('run') or 'unknown'}",
+                f"  chunk_method: {document.get('chunk_method') or 'unknown'}",
+                f"  chunks: {document.get('chunk_count') if document.get('chunk_count') is not None else 'unknown'}",
+                f"  tokens: {document.get('token_count') if document.get('token_count') is not None else 'unknown'}",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     configure_stdio_utf8()
     load_repo_env(repo_root_from_path(__file__))
     args = _parse_args(argv)
 
     try:
+        base_url = resolve_base_url(args.base_url)
+        api_key = require_api_key()
+        if args.command == "list":
+            payload = list_documents(
+                args.dataset_id,
+                page=args.page,
+                page_size=args.page_size,
+                base_url=base_url,
+                api_key=api_key,
+            )
+            print(format_json(payload) if args.json_output else _format_list_text(payload))
+            return 0
+
+        if args.command == "delete":
+            payload = delete_documents(args.dataset_id, args.ids, base_url=base_url, api_key=api_key)
+            print(format_json(payload) if args.json_output else _format_delete_text(payload))
+            return 0
+
         payload = upload_documents(
             args.dataset_id,
             args.files,
-            base_url=resolve_base_url(args.base_url),
-            api_key=require_api_key(),
+            base_url=base_url,
+            api_key=api_key,
         )
         print(format_json(payload) if args.json_output else _format_text(payload))
         return 0
     except ScriptError as exc:
         if args.json_output:
-            print(
-                format_json(
+            error_payload = {
+                "dataset_id": getattr(args, "dataset_id", ""),
+                "error": str(exc),
+            }
+            if getattr(args, "command", "upload") == "delete":
+                error_payload.update(
                     {
-                        "dataset_id": args.dataset_id,
+                        "deleted_at": current_timestamp(),
+                        "deleted_count": 0,
+                        "document_ids": [],
+                    }
+                )
+            elif getattr(args, "command", "upload") == "list":
+                error_payload.update(
+                    {
+                        "checked_at": current_timestamp(),
+                        "page": getattr(args, "page", 1),
+                        "page_size": getattr(args, "page_size", 100),
+                        "count": 0,
+                        "total": 0,
+                        "documents": [],
+                    }
+                )
+            else:
+                error_payload.update(
+                    {
                         "uploaded_at": current_timestamp(),
                         "uploaded_count": 0,
                         "document_ids": [],
                         "documents": [],
-                        "error": str(exc),
                     }
                 )
+            print(
+                format_json(error_payload)
             )
         else:
             print(f"Error: {exc}")
