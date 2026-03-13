@@ -45,6 +45,11 @@ python scripts/parse.py DATASET_ID DOC_ID1 [DOC_ID2 ...]
 - `--watch`: print periodic status updates until the target documents reach terminal states
 - `--background`: start a detached watcher and return `pid`, `output_path`, and `error_path`
 
+For later requests like "Check the progress" or "Which files are currently being parsed", resolve scope by specificity:
+- no dataset specified: inspect all datasets and all documents
+- dataset specified: inspect all documents in that dataset
+- document IDs specified: inspect only those documents
+
 ## Scope
 
 Support only:
@@ -61,6 +66,8 @@ Support only:
 - return one current parser status snapshot
 - print periodic parse status updates
 - start a background parse watcher
+- list all currently parsing documents in a dataset for broad progress requests
+- aggregate parse progress across all datasets for broad progress requests
 
 Do not use this skill for retrieval, chunk editing, memory APIs, or other RAGFlow capabilities.
 
@@ -98,9 +105,11 @@ python scripts/upload.py list DATASET_ID --json
 python scripts/upload.py DATASET_ID ./example.pdf --json
 python scripts/update_document.py DATASET_ID DOC_ID --name "Updated Document" --enabled 1 --json
 python scripts/upload.py delete DATASET_ID --ids DOC_ID1,DOC_ID2 --json
+python scripts/datasets.py list --json
 python scripts/parse.py DATASET_ID DOC_ID1 --json
 python scripts/parse.py DATASET_ID DOC_ID1 --watch --json
 python scripts/parse.py DATASET_ID DOC_ID1 --background --output /tmp/parse-status.json --json
+python scripts/parse_status.py DATASET_ID --json
 ```
 
 ## Notes
@@ -112,5 +121,9 @@ python scripts/parse.py DATASET_ID DOC_ID1 --background --output /tmp/parse-stat
 - Dataset and document deletion are destructive. Require explicit target IDs.
 - Parsing is asynchronous.
 - `parse.py` returns parser status immediately after the start request; use `--watch` for periodic updates or `--background` for a detached watcher.
+- For broad status/progress requests with no dataset specified, list datasets first and aggregate `scripts/parse_status.py DATASET_ID` across all datasets.
+- If a dataset is specified, prefer `scripts/parse_status.py DATASET_ID` without `--doc-ids`.
+- If document IDs are specified, pass `--doc-ids`.
+- Summarize RUNNING files first.
 - Status reporting is derived from the dataset document list API. It does not fabricate percentage progress.
 - `--background` writes the final JSON payload to `output_path`.

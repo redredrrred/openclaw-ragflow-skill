@@ -28,6 +28,7 @@ python scripts/parse.py DATASET_ID DOC_ID1 --background --output /tmp/parse-stat
 ```
 
 If the user only wants a later status check without starting parsing, switch to `ragflow-parser-status`.
+For later status checks, resolve scope by specificity: all datasets by default, then one dataset if specified, then specific documents if specified.
 
 ## Scope
 
@@ -44,7 +45,7 @@ Do not use this skill for dataset creation, file upload, or standalone parser-st
 Configure `.env` with:
 
 ```bash
-RAGFLOW_API_URL=base-url-here
+RAGFLOW_BASE_URL=http://127.0.0.1:9380
 RAGFLOW_API_KEY=ragflow-your-api-key-here
 ```
 
@@ -62,3 +63,4 @@ python scripts/parse.py DATASET_ID DOC_ID1 --background --output /tmp/parse-stat
 - `parse.py` always starts parsing before reporting status.
 - Status is derived from the dataset documents API; it does not invent progress percentages.
 - Use document IDs from a fresh upload when you want to limit monitoring to the new files.
+- If the user later asks for "progress" or "what is still parsing", prefer `ragflow-parser-status`; use all datasets by default, one dataset if specified, and `--doc-ids` only when the user explicitly asks for specific documents.

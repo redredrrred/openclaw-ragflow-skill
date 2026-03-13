@@ -1,4 +1,4 @@
 interface:
   display_name: "RAGFlow Parser Status"
   short_description: "Check, poll, or background-track RAGFlow parsing"
-  default_prompt: "Use $ragflow-parser-status to check, poll, or background-monitor RAGFlow parser status for uploaded documents."
+  default_prompt: "Use $ragflow-parser-status to check, poll, or background-monitor RAGFlow parser status. Resolve scope by specificity: all datasets by default, one dataset when specified, and specific documents only when explicitly specified. In broad progress requests, list currently RUNNING documents first."
