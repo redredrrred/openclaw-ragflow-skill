@@ -69,6 +69,7 @@ def start_parse(dataset_id, document_ids):
     print(f'[OK] Parse started for dataset {dataset_id}')
     print(json.dumps({'dataset_id': dataset_id, 'document_ids': document_ids}, ensure_ascii=False))
     print('Parsing is asynchronous; check document status later.')
+    print(f"Next: python scripts/parse_status.py {dataset_id} --doc-ids {','.join(document_ids)} --watch")
     return 0
 
 
