@@ -382,7 +382,7 @@ def start_background_watch(
         "output_path": str(resolved_output),
         "error_path": str(resolved_error),
         "initial_status": initial_status,
-        "message": "Background watcher started. Read output_path after completion or call parse_status.py again for the current state.",
+        "message": "Background watcher started. Read output_path after completion for the final status snapshot.",
     }
 
 
