@@ -1,9 +1,9 @@
 ---
 name: ragflow-dataset-ingest
-description: "Use for RAGFlow dataset ingestion tasks: create, list, inspect, update, or delete datasets; list, upload, update, or delete documents in a dataset; start parsing uploaded documents; and track parser status through `parse.py` snapshot, watch, or background modes."
+description: "Use for RAGFlow dataset and retrieval tasks: create, list, inspect, update, or delete datasets; list, upload, update, or delete documents in a dataset; start parsing uploaded documents; track parser status through `parse.py`; and retrieve relevant chunks from RAGFlow datasets with `search.py`."
 ---
 
-# RAGFlow Dataset Ingest
+# RAGFlow Dataset And Retrieval
 
 Use only the bundled scripts in `scripts/`.
 
@@ -52,6 +52,16 @@ For later requests like "Check the progress" or "Which files are currently being
 - dataset specified: inspect all documents in that dataset
 - document IDs specified: inspect only those documents
 
+4. Retrieve chunks from one or more datasets when the user asks knowledge questions against RAGFlow.
+
+```bash
+python scripts/search.py "What does the warranty policy say?"
+python scripts/search.py "What does the warranty policy say?" DATASET_ID
+python scripts/search.py --dataset-ids DATASET_ID1,DATASET_ID2 --doc-ids DOC_ID1,DOC_ID2 "What does the warranty policy say?"
+python scripts/search.py --threshold 0.7 --top-k 10 "query"
+python scripts/search.py --retrieval-test --kb-id DATASET_ID "query"
+```
+
 ## Scope
 
 Support only:
@@ -70,8 +80,11 @@ Support only:
 - start a background parse watcher
 - list all currently parsing documents in a dataset for broad progress requests
 - aggregate parse progress across all datasets for broad progress requests
+- retrieve relevant chunks from one or more datasets
+- limit retrieval to specific dataset IDs or document IDs
+- use `retrieval_test` for single-dataset debugging when needed
 
-Do not use this skill for retrieval, chunk editing, memory APIs, or other RAGFlow capabilities.
+Do not use this skill for chunk editing, memory APIs, or other RAGFlow capabilities outside dataset operations and retrieval.
 
 ## Environment
 
@@ -80,6 +93,7 @@ Configure `.env` with:
 ```bash
 RAGFLOW_BASE_URL=http://127.0.0.1:9380
 RAGFLOW_API_KEY=ragflow-your-api-key-here
+RAGFLOW_DATASET_IDS=["dataset-id-1", "dataset-id-2"]
 ```
 
 ## Endpoints
@@ -93,6 +107,8 @@ RAGFLOW_API_KEY=ragflow-your-api-key-here
 - `DELETE /api/v1/datasets/<dataset_id>/documents`
 - `POST /api/v1/datasets/<dataset_id>/chunks`
 - `GET /api/v1/datasets/<dataset_id>/documents`
+- `POST /api/v1/retrieval`
+- `POST /api/v1/chunk/retrieval_test`
 
 ## Commands
 
@@ -112,6 +128,10 @@ python scripts/parse.py DATASET_ID DOC_ID1 --json
 python scripts/parse.py DATASET_ID DOC_ID1 --watch --json
 python scripts/parse.py DATASET_ID DOC_ID1 --background --output /tmp/parse-status.json --json
 python scripts/parse_status.py DATASET_ID --json
+python scripts/search.py "query"
+python scripts/search.py "query" DATASET_ID --json
+python scripts/search.py --dataset-ids DATASET_ID1,DATASET_ID2 --doc-ids DOC_ID1,DOC_ID2 "query" --json
+python scripts/search.py --retrieval-test --kb-id DATASET_ID "query" --json
 ```
 
 ## Notes
@@ -130,3 +150,6 @@ python scripts/parse_status.py DATASET_ID --json
 - Summarize RUNNING files first.
 - Status reporting is derived from the dataset document list API. It does not fabricate percentage progress.
 - `--background` writes the final JSON payload to `output_path`.
+- Retrieval defaults to `POST /api/v1/retrieval`.
+- `scripts/search.py` accepts `RAGFLOW_DATASET_IDS` from `.env` as the default dataset scope when the user does not specify dataset IDs explicitly.
+- Use `--retrieval-test` only when the user wants single-dataset debugging or specifically asks for that endpoint.

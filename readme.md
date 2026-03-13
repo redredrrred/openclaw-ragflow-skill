@@ -7,6 +7,7 @@ This library focuses on:
 - parsing control
 - progress tracking
 - dataset and document inspection
+- retrieval and knowledge lookup
 - dataset and document deletion
 - troubleshooting
 
@@ -128,7 +129,33 @@ Show the parsing status summary of "{dataset_name}".
 Include total files, RUNNING, DONE, FAIL, and CANCEL counts.
 ```
 
-### 6. Troubleshooting
+### 6. Retrieval
+
+#### Search all configured datasets
+
+```text
+Search my RAGFlow knowledge base for: "{query}".
+```
+
+#### Search one dataset only
+
+```text
+Search the "{dataset_name}" dataset for: "{query}".
+```
+
+#### Search specific files only
+
+```text
+Search document IDs "{document_id_1}" and "{document_id_2}" in "{dataset_name}" for: "{query}".
+```
+
+#### High precision retrieval
+
+```text
+Search "{dataset_name}" for "{query}" with a higher similarity threshold and show the best chunks.
+```
+
+### 7. Troubleshooting
 
 #### Check why parsing failed
 
@@ -142,7 +169,7 @@ Check why this document failed to parse: "{document_id}" in "{dataset_name}".
 Show the parsing details for document ID "{document_id}" in "{dataset_name}".
 ```
 
-### 7. Deletion And Cleanup
+### 8. Deletion And Cleanup
 
 #### Delete specific documents from a dataset
 
@@ -170,7 +197,7 @@ Delete these datasets in RAGFlow:
 "{dataset_name_2}"
 ```
 
-### 8. Recommended Automation Prompt
+### 9. Recommended Automation Prompt
 
 ```text
 Upload the file at "{file_path}" to "{dataset_name}", start parsing, and report progress every 10 seconds until parsing is complete.
@@ -186,6 +213,7 @@ If you only need the most useful prompts, start with these:
 4. `Show the parsing progress of all files in "{dataset_name}".`
 5. `Check why document "{document_id}" failed to parse in "{dataset_name}".`
 6. `Delete document "{document_id}" from "{dataset_name}".`
+7. `Search the "{dataset_name}" dataset for: "{query}".`
 
 ## Typical Workflow
 
@@ -195,8 +223,9 @@ A standard ingestion flow looks like this:
 2. Start parsing
 3. Monitor parsing progress
 4. Review dataset status
-5. Troubleshoot failed documents if needed
-6. Delete documents or datasets when cleanup is needed
+5. Search the dataset for relevant answers
+6. Troubleshoot failed documents if needed
+7. Delete documents or datasets when cleanup is needed
 
 ## What To Provide
 
@@ -207,6 +236,7 @@ For best results, include as much of the following as possible:
 - document ID, if you are targeting a specific document
 - polling interval, if you want repeated progress updates
 - whether you want a one-time check or continuous monitoring
+- query text, if you want retrieval
 
 For deletion tasks, provide:
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "RAGFlow Retrieval"
+  short_description: "Search RAGFlow datasets for matching chunks"
+  default_prompt: "Use $ragflow-retrieval to inspect datasets and retrieve relevant documents or chunks from RAGFlow. Prefer the standard retrieval API by default and use retrieval_test only for single-dataset debugging."
