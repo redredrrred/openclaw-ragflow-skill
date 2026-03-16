@@ -37,7 +37,12 @@ python scripts/datasets.py delete --ids DATASET_ID1,DATASET_ID2
 python scripts/upload.py delete DATASET_ID --ids DOC_ID1,DOC_ID2
 ```
 
-For document deletion, execute only against explicit document IDs. If the user gives filenames or a fuzzy description, list documents first, resolve exact IDs, and only then run the delete command. Do not perform fuzzy batch delete operations.
+⚠️ **DELETION REQUIRES CONFIRMATION**: Before executing any delete operation (datasets or documents):
+1. List items to be deleted with details (names, IDs, counts)
+2. Ask user for explicit confirmation (e.g., "yes", "confirm", "proceed")
+3. Only proceed after user confirms
+
+For dataset deletion, execute only against explicit dataset IDs. For document deletion, execute only against explicit document IDs. If the user gives filenames or a fuzzy description, list documents first, resolve exact IDs, get confirmation, and only then run the delete command. Do not perform fuzzy batch delete operations.
 
 3. Start parsing, or stop parsing when explicitly requested.
 
