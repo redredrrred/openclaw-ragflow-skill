@@ -62,16 +62,10 @@ Upload these files to the "{dataset_name}" dataset:
 Upload this file to "{dataset_name}" and start parsing.
 ```
 
-#### Upload, parse, and report progress
+#### Upload from a local path and parse
 
 ```text
-Upload this file to "{dataset_name}", start parsing, and report progress every {interval} seconds.
-```
-
-#### Upload from a local path, parse, and watch until done
-
-```text
-Upload the file at "{file_path}" to "{dataset_name}", start parsing, and keep reporting progress until it finishes.
+Upload the file at "{file_path}" to "{dataset_name}" and start parsing.
 ```
 
 ### 3. Parsing Task Control
@@ -218,7 +212,7 @@ Delete these datasets in RAGFlow:
 ### 9. Recommended Automation Prompt
 
 ```text
-Upload the file at "{file_path}" to "{dataset_name}", start parsing, and report progress every 10 seconds until parsing is complete.
+Upload the file at "{file_path}" to "{dataset_name}" and start parsing.
 ```
 
 ## Minimal Prompt Set
@@ -255,8 +249,6 @@ For best results, include as much of the following as possible:
 - local file path
 - document ID, if you are targeting a specific document
 - explicit document IDs if you want to stop parsing
-- polling interval, if you want repeated progress updates
-- whether you want a one-time check or continuous monitoring
 - query text, if you want retrieval
 
 For deletion tasks, provide:

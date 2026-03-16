@@ -2,16 +2,8 @@
 # -*- coding: utf-8 -*-
 
 import argparse
-import hashlib
-import json
-import os
-import subprocess
-import sys
-import tempfile
-import time
 import urllib.parse
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any
 
 from common import (
@@ -28,10 +20,9 @@ from common import (
     request_json,
     require_api_key,
     resolve_base_url,
+    serialize_script_error,
 )
 
-DEFAULT_INTERVAL = 10.0
-DEFAULT_TIMEOUT = 1800.0
 DEFAULT_PAGE_SIZE = 100
 STATUS_ORDER = ("UNSTART", "RUNNING", "DONE", "FAIL", "CANCEL")
 TERMINAL_STATES = {"DONE", "FAIL", "CANCEL"}
@@ -42,13 +33,6 @@ RUN_STATUS_MAP = {
     "3": "DONE",
     "4": "FAIL",
 }
-
-
-class WatchTimeout(ScriptError):
-    def __init__(self, timeout_seconds: float, payload: dict[str, Any]):
-        super().__init__(f"Watch timeout after {format_number(timeout_seconds)} seconds.")
-        self.timeout_seconds = timeout_seconds
-        self.payload = payload
 
 
 @dataclass
@@ -76,17 +60,6 @@ def parse_doc_ids(raw_value: str | None) -> list[str] | None:
     if not doc_ids:
         raise ConfigError("--doc-ids must include at least one document ID.")
     return doc_ids
-
-
-def format_number(value: float) -> str:
-    if float(value).is_integer():
-        return str(int(value))
-    return f"{value:g}"
-
-
-def _validate_positive(name: str, value: float) -> None:
-    if value <= 0:
-        raise ConfigError(f"{name} must be greater than 0.")
 
 
 def _build_documents_url(base_url: str, dataset_id: str, page: int, page_size: int) -> str:
@@ -247,163 +220,12 @@ def format_status_text(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def watch_status_until_terminal(
-    dataset_id: str,
-    target_ids: list[str] | None = None,
-    *,
-    interval: float = DEFAULT_INTERVAL,
-    timeout: float = DEFAULT_TIMEOUT,
-    base_url: str | None = None,
-    api_key: str | None = None,
-    print_updates: bool = False,
-) -> dict[str, Any]:
-    resolved_base_url = base_url or resolve_base_url()
-    resolved_api_key = api_key or require_api_key()
-    started_at = time.monotonic()
-    last_signature = None
-
-    while True:
-        payload = collect_status_payload(
-            dataset_id,
-            target_ids,
-            base_url=resolved_base_url,
-            api_key=resolved_api_key,
-        )
-        if print_updates:
-            signature = json.dumps(
-                {
-                    "summary": payload["summary"],
-                    "documents": payload["documents"],
-                    "all_terminal": payload["all_terminal"],
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-            if signature != last_signature:
-                if last_signature is not None:
-                    print()
-                print(format_status_text(payload), flush=True)
-                last_signature = signature
-
-        if payload["all_terminal"]:
-            return payload
-
-        if time.monotonic() - started_at >= timeout:
-            raise WatchTimeout(timeout, payload)
-
-        time.sleep(interval)
-
-
-def _build_background_paths(dataset_id: str, target_ids: list[str] | None, output_path: Path | None) -> tuple[Path, Path]:
-    if output_path is not None:
-        resolved_output = output_path.expanduser().resolve()
-        resolved_output.parent.mkdir(parents=True, exist_ok=True)
-        return resolved_output, resolved_output.with_suffix(resolved_output.suffix + ".log")
-
-    digest_source = ",".join(target_ids or ["all"])
-    digest = hashlib.sha1(f"{dataset_id}:{digest_source}".encode("utf-8")).hexdigest()[:10]
-    temp_dir = Path(tempfile.gettempdir()) / "ragflow-dataset-ingest"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"parse-status-{dataset_id[:12]}-{digest}-{int(time.time())}.json"
-    resolved_output = temp_dir / filename
-    return resolved_output, resolved_output.with_suffix(".log")
-
-
-def start_background_watch(
-    dataset_id: str,
-    target_ids: list[str] | None = None,
-    *,
-    interval: float = DEFAULT_INTERVAL,
-    timeout: float = DEFAULT_TIMEOUT,
-    base_url: str | None = None,
-    api_key: str | None = None,
-    output_path: Path | None = None,
-) -> dict[str, Any]:
-    resolved_base_url = base_url or resolve_base_url()
-    resolved_api_key = api_key or require_api_key()
-    initial_status = collect_status_payload(
-        dataset_id,
-        target_ids,
-        base_url=resolved_base_url,
-        api_key=resolved_api_key,
-    )
-    resolved_output, resolved_error = _build_background_paths(dataset_id, target_ids, output_path)
-
-    if initial_status["all_terminal"]:
-        return {
-            "dataset_id": dataset_id,
-            "document_ids": target_ids or [],
-            "checked_at": current_timestamp(),
-            "mode": "background",
-            "skipped": True,
-            "pid": None,
-            "output_path": str(resolved_output),
-            "error_path": str(resolved_error),
-            "initial_status": initial_status,
-            "message": "All target documents are already in a terminal state. Background watcher was not started.",
-        }
-
-    command = [
-        sys.executable,
-        str(Path(__file__).resolve()),
-        dataset_id,
-        "--watch",
-        "--json",
-        "--interval",
-        format_number(interval),
-        "--timeout",
-        format_number(timeout),
-    ]
-    if target_ids:
-        command.extend(["--doc-ids", ",".join(target_ids)])
-    if base_url:
-        command.extend(["--base-url", base_url])
-
-    with resolved_output.open("w", encoding="utf-8") as stdout_file, resolved_error.open("w", encoding="utf-8") as stderr_file:
-        popen_kwargs: dict[str, Any] = {
-            "stdin": subprocess.DEVNULL,
-            "stdout": stdout_file,
-            "stderr": stderr_file,
-            "close_fds": True,
-        }
-        if os.name == "nt":
-            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-        else:
-            popen_kwargs["start_new_session"] = True
-        process = subprocess.Popen(command, **popen_kwargs)
-
-    return {
-        "dataset_id": dataset_id,
-        "document_ids": target_ids or [],
-        "checked_at": current_timestamp(),
-        "mode": "background",
-        "skipped": False,
-        "pid": process.pid,
-        "output_path": str(resolved_output),
-        "error_path": str(resolved_error),
-        "initial_status": initial_status,
-        "message": "Background watcher started. Read output_path after completion for the final status snapshot.",
-    }
-
-
-def _format_background_text(payload: dict[str, Any]) -> str:
-    lines = [
-        f"Dataset: {payload['dataset_id']}",
-        f"Checked at: {payload['checked_at']}",
-        f"Mode: {payload['mode']}",
-        f"PID: {payload['pid'] if payload['pid'] is not None else 'not started'}",
-        f"Output: {payload['output_path']}",
-        f"Log: {payload['error_path']}",
-        "",
-        payload["message"],
-        "",
-        "Initial status:",
-        format_status_text(payload["initial_status"]),
-    ]
-    return "\n".join(lines)
-
-
-def _write_error(message: str, json_output: bool, dataset_id: str | None = None, payload: dict[str, Any] | None = None) -> None:
+def _write_error(
+    exc: ScriptError,
+    json_output: bool,
+    dataset_id: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> None:
     if json_output:
         error_payload: dict[str, Any] = {}
         if payload:
@@ -412,34 +234,22 @@ def _write_error(message: str, json_output: bool, dataset_id: str | None = None,
             error_payload["dataset_id"] = dataset_id
         if "checked_at" not in error_payload:
             error_payload["checked_at"] = current_timestamp()
-        if "timed_out" not in error_payload:
-            error_payload["timed_out"] = False
-        error_payload["error"] = message
+        error_payload["error"] = str(exc)
+        error_detail = serialize_script_error(exc)
+        if isinstance(exc, ApiError):
+            error_payload["api_error"] = error_detail
+        else:
+            error_payload["error_detail"] = error_detail
         print(format_json(error_payload))
         return
 
-    print(f"Error: {message}", file=sys.stderr)
+    print(f"Error: {exc}", file=sys.stderr)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Show, poll, or background-watch document parse status for a dataset.")
+    parser = argparse.ArgumentParser(description="Show document parse status for a dataset.")
     parser.add_argument("dataset_id", help="Dataset ID")
     parser.add_argument("--doc-ids", help="Comma-separated document IDs to monitor")
-    parser.add_argument("--watch", action="store_true", help="Poll until all target documents reach a terminal state")
-    parser.add_argument("--background", action="store_true", help="Start a detached watcher and return immediately")
-    parser.add_argument("--output", help="Write background-watch JSON to this file")
-    parser.add_argument(
-        "--interval",
-        type=float,
-        default=DEFAULT_INTERVAL,
-        help=f"Polling interval in seconds (default: {int(DEFAULT_INTERVAL)})",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=float,
-        default=DEFAULT_TIMEOUT,
-        help=f"Polling timeout in seconds (default: {int(DEFAULT_TIMEOUT)})",
-    )
     parser.add_argument("--json", action="store_true", dest="json_output", help="Print JSON output")
     parser.add_argument(
         "--base-url",
@@ -455,37 +265,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         target_ids = parse_doc_ids(args.doc_ids)
-        _validate_positive("--interval", args.interval)
-        _validate_positive("--timeout", args.timeout)
         api_key = require_api_key()
         base_url = resolve_base_url(args.base_url)
-
-        if args.background:
-            payload = start_background_watch(
-                args.dataset_id,
-                target_ids,
-                interval=args.interval,
-                timeout=args.timeout,
-                base_url=base_url,
-                api_key=api_key,
-                output_path=Path(args.output) if args.output else None,
-            )
-            print(format_json(payload) if args.json_output else _format_background_text(payload))
-            return 0
-
-        if args.watch:
-            payload = watch_status_until_terminal(
-                args.dataset_id,
-                target_ids,
-                interval=args.interval,
-                timeout=args.timeout,
-                base_url=base_url,
-                api_key=api_key,
-                print_updates=not args.json_output,
-            )
-            if args.json_output:
-                print(format_json(payload))
-            return 0
 
         payload = collect_status_payload(
             args.dataset_id,
@@ -495,13 +276,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(format_json(payload) if args.json_output else format_status_text(payload))
         return 0
-    except WatchTimeout as exc:
-        timeout_payload = dict(exc.payload)
-        timeout_payload["timed_out"] = True
-        _write_error(str(exc), args.json_output, dataset_id=args.dataset_id, payload=timeout_payload)
-        return 1
     except ScriptError as exc:
-        _write_error(str(exc), args.json_output, dataset_id=args.dataset_id)
+        _write_error(exc, args.json_output, dataset_id=args.dataset_id)
         return 1
 
 

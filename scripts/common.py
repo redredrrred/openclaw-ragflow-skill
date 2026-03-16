@@ -25,7 +25,20 @@ class ConfigError(ScriptError):
 
 
 class ApiError(ScriptError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        http_status: int | None = None,
+        api_code: Any | None = None,
+        response_payload: Any | None = None,
+        response_body: str | None = None,
+    ):
+        super().__init__(message)
+        self.http_status = http_status
+        self.api_code = api_code
+        self.response_payload = response_payload
+        self.response_body = response_body
 
 
 class DataError(ScriptError):
@@ -119,13 +132,28 @@ def decode_json_response(body: bytes) -> dict[str, Any]:
     return payload
 
 
-def extract_error_message(body: bytes) -> str | None:
+def decode_response_text(body: bytes) -> str | None:
     if not body:
         return None
     try:
-        payload = json.loads(body.decode("utf-8"))
+        text = body.decode("utf-8", errors="replace").strip()
     except Exception:
         return None
+    return text or None
+
+
+def decode_json_body(body: bytes) -> Any | None:
+    text = decode_response_text(body)
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
+def extract_error_message(body: bytes) -> str | None:
+    payload = decode_json_body(body)
     if not isinstance(payload, dict):
         return None
 
@@ -133,6 +161,23 @@ def extract_error_message(body: bytes) -> str | None:
     if isinstance(message, str) and message.strip():
         return message.strip()
     return None
+
+
+def serialize_script_error(exc: ScriptError) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "type": exc.__class__.__name__,
+        "message": str(exc),
+    }
+    if isinstance(exc, ApiError):
+        if exc.http_status is not None:
+            payload["http_status"] = exc.http_status
+        if exc.api_code is not None:
+            payload["api_code"] = exc.api_code
+        if exc.response_payload is not None:
+            payload["response"] = exc.response_payload
+        elif exc.response_body:
+            payload["response_body"] = exc.response_body
+    return payload
 
 
 def request_json(
@@ -157,10 +202,24 @@ def request_json(
             return decode_json_response(response.read())
     except urllib.error.HTTPError as exc:
         body_bytes = exc.read()
+        response_payload = decode_json_body(body_bytes)
+        response_text = decode_response_text(body_bytes)
         message = extract_error_message(body_bytes)
         if message:
-            raise ApiError(message) from None
-        raise ApiError(f"HTTP request failed with status {exc.code}.") from None
+            raise ApiError(
+                message,
+                http_status=exc.code,
+                api_code=response_payload.get("code") if isinstance(response_payload, dict) else None,
+                response_payload=response_payload,
+                response_body=response_text,
+            ) from None
+        raise ApiError(
+            f"HTTP request failed with status {exc.code}.",
+            http_status=exc.code,
+            api_code=response_payload.get("code") if isinstance(response_payload, dict) else None,
+            response_payload=response_payload,
+            response_body=response_text,
+        ) from None
     except urllib.error.URLError as exc:
         reason = getattr(exc, "reason", exc)
         raise ApiError(f"HTTP request failed: {reason}") from None
@@ -170,7 +229,7 @@ def ensure_success(payload: dict[str, Any]) -> dict[str, Any]:
     code = payload.get("code")
     if code != 0:
         message = payload.get("message") or f"API returned code {code}."
-        raise ApiError(str(message))
+        raise ApiError(str(message), api_code=code, response_payload=payload)
     return payload
 
 

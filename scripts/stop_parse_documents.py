@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from common import (
+    ApiError,
     ScriptError,
     configure_stdio_utf8,
     current_timestamp,
@@ -16,6 +17,7 @@ from common import (
     request_json,
     require_api_key,
     resolve_base_url,
+    serialize_script_error,
 )
 from parse_status import collect_status_payload, format_status_text
 
@@ -50,6 +52,7 @@ def stop_parse(dataset_id: str, document_ids: list[str], *, base_url: str, api_k
         "dataset_id": dataset_id,
         "document_ids": document_ids,
         "stop_requested_at": current_timestamp(),
+        "api_response": response,
     }
     message = response.get("message")
     if isinstance(message, str) and message.strip():
@@ -81,11 +84,15 @@ def main(argv: list[str] | None = None) -> int:
     configure_stdio_utf8()
     load_repo_env(repo_root_from_path(__file__))
     args = _parse_args(argv)
+    stop_request: dict[str, Any] | None = None
+    phase = "validate"
 
     try:
         base_url = resolve_base_url(args.base_url)
         api_key = require_api_key()
+        phase = "stop_parse"
         stop_request = stop_parse(args.dataset_id, args.document_ids, base_url=base_url, api_key=api_key)
+        phase = "status"
         status_payload = collect_status_payload(
             args.dataset_id,
             args.document_ids,
@@ -97,15 +104,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except ScriptError as exc:
         if args.json_output:
+            payload: dict[str, Any] = (
+                dict(stop_request)
+                if stop_request is not None
+                else {
+                    "dataset_id": args.dataset_id,
+                    "document_ids": args.document_ids,
+                    "stop_requested_at": current_timestamp(),
+                }
+            )
+            payload["error"] = str(exc)
+            error_detail = serialize_script_error(exc)
+            if phase == "stop_parse" and isinstance(exc, ApiError):
+                payload["api_error"] = error_detail
+            elif phase == "status" or stop_request is not None:
+                payload["status_error"] = error_detail
+            else:
+                payload["error_detail"] = error_detail
             print(
-                format_json(
-                    {
-                        "dataset_id": args.dataset_id,
-                        "document_ids": args.document_ids,
-                        "stop_requested_at": current_timestamp(),
-                        "error": str(exc),
-                    }
-                )
+                format_json(payload)
             )
         else:
             print(f"Error: {exc}")

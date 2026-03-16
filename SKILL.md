@@ -1,11 +1,12 @@
 ---
 name: ragflow-dataset-ingest
-description: "Use for RAGFlow dataset and retrieval tasks: create, list, inspect, update, or delete datasets; list, upload, update, or delete documents in a dataset; start or stop parsing uploaded documents; track parser status through `parse.py` and `parse_status.py`; and retrieve relevant chunks from RAGFlow datasets with `search.py`."
+description: "Use for RAGFlow dataset and retrieval tasks: create, list, inspect, update, or delete datasets; list, upload, update, or delete documents in a dataset; start or stop parsing uploaded documents; check parser status through `parse_status.py`; and retrieve relevant chunks from RAGFlow datasets with `search.py`."
 ---
 
 # RAGFlow Dataset And Retrieval
 
 Use only the bundled scripts in `scripts/`.
+Prefer `--json` for script execution so the returned fields can be relayed exactly.
 
 ## Workflow
 
@@ -38,19 +39,18 @@ python scripts/upload.py delete DATASET_ID --ids DOC_ID1,DOC_ID2
 
 For document deletion, execute only against explicit document IDs. If the user gives filenames or a fuzzy description, list documents first, resolve exact IDs, and only then run the delete command. Do not perform fuzzy batch delete operations.
 
-3. Start parsing, stop parsing when explicitly requested, and return parser status.
+3. Start parsing, or stop parsing when explicitly requested.
 
 ```bash
 python scripts/parse.py DATASET_ID DOC_ID1 [DOC_ID2 ...]
 python scripts/stop_parse_documents.py DATASET_ID DOC_ID1 [DOC_ID2 ...]
 ```
 
-`parse.py` always starts parsing first, then returns status in one of three modes:
-- default: return one current parser status snapshot
-- `--watch`: print periodic status updates until the target documents reach terminal states
-- `--background`: start a detached watcher and return `pid`, `output_path`, and `error_path`
+`parse.py` only sends the parse request and returns immediately.
 
 `stop_parse_documents.py` sends a stop request for explicit document IDs, then returns one current status snapshot for those documents.
+
+Use `parse_status.py` when the user asks to check progress or current parser status.
 
 For later requests like "Check the progress" or "Which files are currently being parsed", resolve scope by specificity:
 - no dataset specified: inspect all datasets and all documents
@@ -81,9 +81,6 @@ Support only:
 - delete documents from a dataset
 - start parsing documents in a dataset
 - stop parsing documents in a dataset
-- return one current parser status snapshot
-- print periodic parse status updates
-- start a background parse watcher
 - list all currently parsing documents in a dataset for broad progress requests
 - aggregate parse progress across all datasets for broad progress requests
 - retrieve relevant chunks from one or more datasets
@@ -132,8 +129,6 @@ python scripts/update_document.py DATASET_ID DOC_ID --name "Updated Document" --
 python scripts/upload.py delete DATASET_ID --ids DOC_ID1,DOC_ID2 --json
 python scripts/datasets.py list --json
 python scripts/parse.py DATASET_ID DOC_ID1 --json
-python scripts/parse.py DATASET_ID DOC_ID1 --watch --json
-python scripts/parse.py DATASET_ID DOC_ID1 --background --output /tmp/parse-status.json --json
 python scripts/stop_parse_documents.py DATASET_ID DOC_ID1 --json
 python scripts/parse_status.py DATASET_ID --json
 python scripts/search.py "query"
@@ -152,7 +147,11 @@ python scripts/search.py --retrieval-test --kb-id DATASET_ID "query" --json
 - Dataset deletion is destructive. Require explicit dataset IDs.
 - Document deletion is destructive. Require explicit dataset and document IDs. If the user only knows filenames, list documents first and resolve exact IDs before deleting. Do not perform fuzzy batch deletes.
 - Parsing is asynchronous.
-- `parse.py` returns parser status immediately after the start request; use `--watch` for periodic updates or `--background` for a detached watcher.
+- `parse.py` returns immediately after the start request. Do not wait for parse status in this command.
+- Do not infer likely causes when a script returns an error. Report the script JSON fields exactly as returned.
+- When a script returns an error, proactively include the error message in the same reply. Do not wait for the user to ask for the error details.
+- If JSON output contains `api_error`, return that API error object directly instead of replacing it with a guessed explanation.
+- If JSON output contains `error`, `api_error.message`, `status_error.message`, or `error_detail.message`, surface that message to the user immediately.
 - `stop_parse_documents.py` requires explicit dataset and document IDs. If the user only knows filenames, list documents first and resolve exact IDs before stopping parsing. Do not perform fuzzy batch stop operations.
 - A stop request may not flip the document to `CANCEL` immediately. Use the returned snapshot or `scripts/parse_status.py` to confirm the terminal state.
 - For broad status/progress requests with no dataset specified, list datasets first and aggregate `scripts/parse_status.py DATASET_ID` across all datasets.
@@ -160,7 +159,6 @@ python scripts/search.py --retrieval-test --kb-id DATASET_ID "query" --json
 - If document IDs are specified, pass `--doc-ids`.
 - Summarize RUNNING files first.
 - Status reporting is derived from the dataset document list API. It does not fabricate percentage progress.
-- `--background` writes the final JSON payload to `output_path`.
 - Retrieval defaults to `POST /api/v1/retrieval`.
 - `scripts/search.py` accepts `RAGFLOW_DATASET_IDS` from `.env` as the default dataset scope when the user does not specify dataset IDs explicitly.
 - Use `--retrieval-test` only when the user wants single-dataset debugging or specifically asks for that endpoint.
