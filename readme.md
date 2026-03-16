@@ -9,8 +9,15 @@ This library focuses on:
 - progress tracking
 - dataset and document inspection
 - retrieval and knowledge lookup
+- listing configured LLM providers and models
 - dataset and document deletion
 - troubleshooting
+
+For model listing:
+- default behavior should show only available models
+- default grouping should be by model `type`
+- extra details should be shown only when explicitly requested
+- provider / vendor grouping should be supported when requested
 
 ## File Input
 

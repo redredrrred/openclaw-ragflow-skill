@@ -67,6 +67,15 @@ python scripts/search.py --threshold 0.7 --top-k 10 "query"
 python scripts/search.py --retrieval-test --kb-id DATASET_ID "query"
 ```
 
+5. Inspect configured LLM factories and models when the user asks what models are available.
+
+```bash
+python scripts/list_models.py --json
+python scripts/list_models.py --include-details --json
+python scripts/list_models.py --group-by factory --json
+python scripts/list_models.py --all --group-by factory --include-details --json
+```
+
 ## Scope
 
 Support only:
@@ -86,6 +95,7 @@ Support only:
 - retrieve relevant chunks from one or more datasets
 - limit retrieval to specific dataset IDs or document IDs
 - use `retrieval_test` for single-dataset debugging when needed
+- list configured LLM factories and models through the web API
 
 Do not use this skill for chunk editing, memory APIs, or other RAGFlow capabilities outside dataset operations and retrieval.
 
@@ -135,6 +145,8 @@ python scripts/search.py "query"
 python scripts/search.py "query" DATASET_ID --json
 python scripts/search.py --dataset-ids DATASET_ID1,DATASET_ID2 --doc-ids DOC_ID1,DOC_ID2 "query" --json
 python scripts/search.py --retrieval-test --kb-id DATASET_ID "query" --json
+python scripts/list_models.py --json
+python scripts/list_models.py --include-details --json
 ```
 
 ## Notes
@@ -162,3 +174,7 @@ python scripts/search.py --retrieval-test --kb-id DATASET_ID "query" --json
 - Retrieval defaults to `POST /api/v1/retrieval`.
 - `scripts/search.py` accepts `RAGFLOW_DATASET_IDS` from `.env` as the default dataset scope when the user does not specify dataset IDs explicitly.
 - Use `--retrieval-test` only when the user wants single-dataset debugging or specifically asks for that endpoint.
+- `scripts/list_models.py` calls `GET /v1/llm/my_llms` and uses `RAGFLOW_API_KEY` Bearer auth only.
+- Default model-listing behavior: list only available models, grouped by `type`, without extra detail fields.
+- If the user asks for details, provider / vendor breakdown, unavailable models, or a more exhaustive inventory, use `--include-details`, `--group-by factory`, and `--all` as needed.
+- When summarizing model availability to the user, prefer the grouped result in `groups` instead of reintroducing the raw server response shape.
