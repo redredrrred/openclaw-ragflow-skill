@@ -136,6 +136,7 @@ python scripts/stop_parse_documents.py DATASET_ID DOC_ID1 [DOC_ID2 ...]
 
 Use `parse_status.py` when the user asks to check progress or current parser status.
 If `parse_status.py` returns an error, return the error message directly and do not guess the cause.
+If a document status includes `progress_msg`, surface it automatically. For `FAIL` documents, treat `progress_msg` as the primary error detail.
 
 For later requests like "Check the progress" or "Which files are currently being parsed", resolve scope by specificity:
 - no dataset specified: inspect all datasets and all documents
@@ -262,7 +263,6 @@ python scripts/list_models.py --include-details --json
 - Document update supports explicit flags or `--data` JSON payloads through `scripts/update_document.py`.
 - Parsing is asynchronous.
 - `parse.py` returns immediately after the start request. Do not wait for parse status in this command.
-- Do not infer likely causes when a script returns an error. Report the script JSON fields exactly as returned.
 - When a script returns an error, proactively include the error message in the same reply. Do not wait for the user to ask for the error details.
 - If JSON output contains `api_error`, return that API error object directly instead of replacing it with a guessed explanation.
 - If JSON output contains `error`, `api_error.message`, `status_error.message`, or `error_detail.message`, surface that message to the user immediately.

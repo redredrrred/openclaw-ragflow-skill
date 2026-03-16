@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import json
+import sys
 import urllib.parse
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -42,6 +44,7 @@ class DocumentStatus:
     run: str
     chunk_count: int
     token_count: int
+    progress_msg: Any | None = None
 
 
 def parse_doc_ids(raw_value: str | None) -> list[str] | None:
@@ -134,6 +137,13 @@ def _normalize_run(value: Any, document_id: str) -> str:
     raise DataError(f"Document {document_id} has an unsupported run status: {value!r}.")
 
 
+def _normalize_progress_msg(value: Any) -> Any | None:
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    return value
+
+
 def _normalize_document(raw_doc: dict[str, Any]) -> DocumentStatus:
     if not isinstance(raw_doc, dict):
         raise DataError("Response contains a malformed document entry.")
@@ -149,6 +159,7 @@ def _normalize_document(raw_doc: dict[str, Any]) -> DocumentStatus:
         run=_normalize_run(raw_doc.get("run"), document_id),
         chunk_count=_coerce_required_int(document_id, "chunk_count", raw_doc.get("chunk_count")),
         token_count=_coerce_required_int(document_id, "token_count", raw_doc.get("token_count")),
+        progress_msg=_normalize_progress_msg(raw_doc.get("progress_msg")),
     )
 
 
@@ -217,6 +228,12 @@ def format_status_text(payload: dict[str, Any]) -> str:
                 f"tokens: {document['token_count']}",
             ]
         )
+        progress_msg = document.get("progress_msg")
+        if progress_msg is not None:
+            rendered_progress = progress_msg if isinstance(progress_msg, str) else json.dumps(progress_msg, ensure_ascii=False)
+            if rendered_progress:
+                label = "error" if document["run"] == "FAIL" else "message"
+                lines.append(f"{label}: {rendered_progress}")
     return "\n".join(lines)
 
 

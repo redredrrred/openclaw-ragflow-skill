@@ -36,6 +36,7 @@ The skill resolves progress scope by specificity:
 
 For broad progress requests, the assistant should list currently `RUNNING` documents first.
 If parse status returns an error, return that error directly instead of guessing the cause.
+If a parse status document contains `progress_msg`, surface it directly. For `FAIL` documents, use that field as the error detail.
 
 ## Common Prompts
 
