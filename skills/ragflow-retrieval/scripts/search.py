@@ -124,7 +124,7 @@ def search(env, query, dataset_ids=None, top_k=5, similarity_threshold=0.2,
     if vector_similarity_weight is not None:
         body['vector_similarity_weight'] = vector_similarity_weight
     if doc_ids:
-        body['doc_ids'] = doc_ids
+        body['document_ids'] = doc_ids
     if keyword:
         body['keyword'] = True
     if use_kg:
