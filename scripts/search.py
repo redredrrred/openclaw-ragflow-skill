@@ -204,7 +204,7 @@ def search(args: argparse.Namespace, *, base_url: str, api_key: str) -> dict[str
     if args.vector_weight is not None:
         body["vector_similarity_weight"] = args.vector_weight
     if doc_ids:
-        body["doc_ids"] = doc_ids
+        body["document_ids"] = doc_ids
     if args.keyword:
         body["keyword"] = True
     if args.use_kg:
