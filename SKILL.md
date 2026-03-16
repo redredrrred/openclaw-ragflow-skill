@@ -1,6 +1,6 @@
 ---
 name: ragflow-dataset-ingest
-description: "Use for RAGFlow dataset and retrieval tasks: create, list, inspect, update, or delete datasets; list, upload, update, or delete documents in a dataset; start parsing uploaded documents; track parser status through `parse.py`; and retrieve relevant chunks from RAGFlow datasets with `search.py`."
+description: "Use for RAGFlow dataset and retrieval tasks: create, list, inspect, update, or delete datasets; list, upload, update, or delete documents in a dataset; start or stop parsing uploaded documents; track parser status through `parse.py` and `parse_status.py`; and retrieve relevant chunks from RAGFlow datasets with `search.py`."
 ---
 
 # RAGFlow Dataset And Retrieval
@@ -36,16 +36,21 @@ python scripts/datasets.py delete --ids DATASET_ID1,DATASET_ID2
 python scripts/upload.py delete DATASET_ID --ids DOC_ID1,DOC_ID2
 ```
 
-3. Start parsing and return parser status.
+For document deletion, execute only against explicit document IDs. If the user gives filenames or a fuzzy description, list documents first, resolve exact IDs, and only then run the delete command. Do not perform fuzzy batch delete operations.
+
+3. Start parsing, stop parsing when explicitly requested, and return parser status.
 
 ```bash
 python scripts/parse.py DATASET_ID DOC_ID1 [DOC_ID2 ...]
+python scripts/stop_parse_documents.py DATASET_ID DOC_ID1 [DOC_ID2 ...]
 ```
 
 `parse.py` always starts parsing first, then returns status in one of three modes:
 - default: return one current parser status snapshot
 - `--watch`: print periodic status updates until the target documents reach terminal states
 - `--background`: start a detached watcher and return `pid`, `output_path`, and `error_path`
+
+`stop_parse_documents.py` sends a stop request for explicit document IDs, then returns one current status snapshot for those documents.
 
 For later requests like "Check the progress" or "Which files are currently being parsed", resolve scope by specificity:
 - no dataset specified: inspect all datasets and all documents
@@ -75,6 +80,7 @@ Support only:
 - update documents in a dataset
 - delete documents from a dataset
 - start parsing documents in a dataset
+- stop parsing documents in a dataset
 - return one current parser status snapshot
 - print periodic parse status updates
 - start a background parse watcher
@@ -106,6 +112,7 @@ RAGFLOW_DATASET_IDS=["dataset-id-1", "dataset-id-2"]
 - `PUT /api/v1/datasets/<dataset_id>/documents/<document_id>`
 - `DELETE /api/v1/datasets/<dataset_id>/documents`
 - `POST /api/v1/datasets/<dataset_id>/chunks`
+- `DELETE /api/v1/datasets/<dataset_id>/chunks`
 - `GET /api/v1/datasets/<dataset_id>/documents`
 - `POST /api/v1/retrieval`
 - `POST /api/v1/chunk/retrieval_test`
@@ -127,6 +134,7 @@ python scripts/datasets.py list --json
 python scripts/parse.py DATASET_ID DOC_ID1 --json
 python scripts/parse.py DATASET_ID DOC_ID1 --watch --json
 python scripts/parse.py DATASET_ID DOC_ID1 --background --output /tmp/parse-status.json --json
+python scripts/stop_parse_documents.py DATASET_ID DOC_ID1 --json
 python scripts/parse_status.py DATASET_ID --json
 python scripts/search.py "query"
 python scripts/search.py "query" DATASET_ID --json
@@ -141,9 +149,12 @@ python scripts/search.py --retrieval-test --kb-id DATASET_ID "query" --json
 - Upload does not start parsing by itself.
 - Prefer local file paths for uploads. Drag-and-drop is acceptable only when the client's UI supports it, and it may fail for large files.
 - Document update supports explicit flags or `--data` JSON payloads through `scripts/update_document.py`.
-- Dataset and document deletion are destructive. Require explicit target IDs.
+- Dataset deletion is destructive. Require explicit dataset IDs.
+- Document deletion is destructive. Require explicit dataset and document IDs. If the user only knows filenames, list documents first and resolve exact IDs before deleting. Do not perform fuzzy batch deletes.
 - Parsing is asynchronous.
 - `parse.py` returns parser status immediately after the start request; use `--watch` for periodic updates or `--background` for a detached watcher.
+- `stop_parse_documents.py` requires explicit dataset and document IDs. If the user only knows filenames, list documents first and resolve exact IDs before stopping parsing. Do not perform fuzzy batch stop operations.
+- A stop request may not flip the document to `CANCEL` immediately. Use the returned snapshot or `scripts/parse_status.py` to confirm the terminal state.
 - For broad status/progress requests with no dataset specified, list datasets first and aggregate `scripts/parse_status.py DATASET_ID` across all datasets.
 - If a dataset is specified, prefer `scripts/parse_status.py DATASET_ID` without `--doc-ids`.
 - If document IDs are specified, pass `--doc-ids`.

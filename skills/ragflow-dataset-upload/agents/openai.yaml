@@ -1,4 +1,0 @@
-interface:
-  display_name: "RAGFlow Dataset Upload"
-  short_description: "Upload or delete documents in a dataset"
-  default_prompt: "Use $ragflow-dataset-upload to list datasets, upload documents into a dataset, or delete documents from a dataset. When asking for files, prefer explicit local file paths; if the client supports it, drag-and-drop is acceptable, but large files may fail and file paths are more reliable."

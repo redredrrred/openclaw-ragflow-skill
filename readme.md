@@ -5,6 +5,7 @@ Common English prompts for using this RAGFlow skill.
 This library focuses on:
 - file upload
 - parsing control
+- stopping parsing for specific documents
 - progress tracking
 - dataset and document inspection
 - retrieval and knowledge lookup
@@ -86,6 +87,18 @@ Start parsing these document IDs in "{dataset_name}":
 
 ```text
 Re-parse the document with ID "{document_id}" in dataset "{dataset_name}".
+```
+
+#### Stop parsing specific files
+
+```text
+Stop parsing document IDs "{document_id_1}" and "{document_id_2}" in "{dataset_name}".
+```
+
+#### Resolve IDs first, then stop parsing
+
+```text
+List all files in "{dataset_name}", find the currently running documents named "{document_name}", and stop parsing those document IDs.
 ```
 
 ### 4. Parsing Progress Queries
@@ -183,6 +196,11 @@ Delete document IDs "{document_id_1}" and "{document_id_2}" from "{dataset_name}
 List all files in "{dataset_name}", find the matching document IDs, and delete the documents named "{document_name}".
 ```
 
+For both delete and stop-parsing actions:
+- execute only on explicit document IDs
+- if the user only knows filenames or partial names, list documents first and resolve exact IDs
+- do not perform fuzzy batch delete or fuzzy batch stop actions
+
 #### Delete a dataset
 
 ```text
@@ -212,8 +230,9 @@ If you only need the most useful prompts, start with these:
 3. `Check the parsing progress.`
 4. `Show the parsing progress of all files in "{dataset_name}".`
 5. `Check why document "{document_id}" failed to parse in "{dataset_name}".`
-6. `Delete document "{document_id}" from "{dataset_name}".`
-7. `Search the "{dataset_name}" dataset for: "{query}".`
+6. `Stop parsing document "{document_id}" in "{dataset_name}".`
+7. `Delete document "{document_id}" from "{dataset_name}".`
+8. `Search the "{dataset_name}" dataset for: "{query}".`
 
 ## Typical Workflow
 
@@ -222,10 +241,11 @@ A standard ingestion flow looks like this:
 1. Upload file
 2. Start parsing
 3. Monitor parsing progress
-4. Review dataset status
-5. Search the dataset for relevant answers
-6. Troubleshoot failed documents if needed
-7. Delete documents or datasets when cleanup is needed
+4. Stop parsing specific documents if needed
+5. Review dataset status
+6. Search the dataset for relevant answers
+7. Troubleshoot failed documents if needed
+8. Delete documents or datasets when cleanup is needed
 
 ## What To Provide
 
@@ -234,6 +254,7 @@ For best results, include as much of the following as possible:
 - dataset name or dataset ID
 - local file path
 - document ID, if you are targeting a specific document
+- explicit document IDs if you want to stop parsing
 - polling interval, if you want repeated progress updates
 - whether you want a one-time check or continuous monitoring
 - query text, if you want retrieval
@@ -241,5 +262,5 @@ For best results, include as much of the following as possible:
 For deletion tasks, provide:
 
 - dataset name or dataset ID
-- document ID when deleting documents directly
-- document name only if you want the assistant to list files first and resolve the ID
+- explicit document IDs when deleting or stopping specific documents
+- document name only if you want the assistant to list files first and resolve exact IDs before acting
