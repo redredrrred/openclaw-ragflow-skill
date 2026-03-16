@@ -1,6 +1,7 @@
 # Output Format Reference
 
 Style guide for consistent RAGFlow skill responses.
+Apply this reference to all user-facing output for this skill.
 
 ## Format Decision Matrix
 
@@ -79,10 +80,20 @@ Style guide for consistent RAGFlow skill responses.
 **Chunks:** 53
 ```
 
-## Quick Rules
+## Model Listing
 
-- ✅ Use tables for 3+ items with multiple attributes
-- ✅ Use definition lists for single objects (<5 properties)
-- ✅ Use emojis for status, not decoration
-- ❌ Don't mix formats for same data
-- ❌ Don't over-format simple information
+- default to listing only available models
+- default to grouping by model `type`
+- if multiple model groups or models are shown, prefer a table
+- if the user asks for details, provider grouping, or unavailable models, expand the output accordingly
+- prefer the grouped result in `groups` instead of reintroducing the raw server response shape
+
+## Progress And Status Output
+
+- summarize `RUNNING` items first when reporting progress
+- status reporting should reflect the dataset document list API as-is; do not fabricate percentage progress
+
+## Error Output
+
+- when returning raw script output, preserve error fields exactly as returned
+- if JSON output contains `api_error`, present that object directly rather than replacing it with a guessed explanation

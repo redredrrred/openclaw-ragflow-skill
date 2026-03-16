@@ -7,7 +7,6 @@ description: "Use for RAGFlow dataset and retrieval tasks: create, list, inspect
 
 Use only the bundled scripts in `scripts/`.
 Prefer `--json` for script execution so the returned fields can be relayed exactly.
-
 ## Workflow
 
 ```bash
@@ -115,19 +114,19 @@ RAGFLOW_DATASET_IDS=["dataset-id-1", "dataset-id-2"]
 ```
 
 ## Endpoints
-
 - `GET /api/v1/datasets`
 - `POST /api/v1/datasets`
 - `PUT /api/v1/datasets/<dataset_id>`
 - `DELETE /api/v1/datasets`
+- `GET /api/v1/datasets/<dataset_id>/documents`
 - `POST /api/v1/datasets/<dataset_id>/documents`
 - `PUT /api/v1/datasets/<dataset_id>/documents/<document_id>`
 - `DELETE /api/v1/datasets/<dataset_id>/documents`
 - `POST /api/v1/datasets/<dataset_id>/chunks`
 - `DELETE /api/v1/datasets/<dataset_id>/chunks`
-- `GET /api/v1/datasets/<dataset_id>/documents`
 - `POST /api/v1/retrieval`
 - `POST /api/v1/chunk/retrieval_test`
+- `GET /v1/llm/my_llms`
 
 ## Commands
 
@@ -161,25 +160,17 @@ python scripts/list_models.py --include-details --json
 - Upload does not start parsing by itself.
 - Prefer local file paths for uploads. Drag-and-drop is acceptable only when the client's UI supports it, and it may fail for large files.
 - Document update supports explicit flags or `--data` JSON payloads through `scripts/update_document.py`.
-- Dataset deletion is destructive. Require explicit dataset IDs.
-- Document deletion is destructive. Require explicit dataset and document IDs. If the user only knows filenames, list documents first and resolve exact IDs before deleting. Do not perform fuzzy batch deletes.
 - Parsing is asynchronous.
 - `parse.py` returns immediately after the start request. Do not wait for parse status in this command.
 - Do not infer likely causes when a script returns an error. Report the script JSON fields exactly as returned.
 - When a script returns an error, proactively include the error message in the same reply. Do not wait for the user to ask for the error details.
 - If JSON output contains `api_error`, return that API error object directly instead of replacing it with a guessed explanation.
 - If JSON output contains `error`, `api_error.message`, `status_error.message`, or `error_detail.message`, surface that message to the user immediately.
-- `stop_parse_documents.py` requires explicit dataset and document IDs. If the user only knows filenames, list documents first and resolve exact IDs before stopping parsing. Do not perform fuzzy batch stop operations.
 - A stop request may not flip the document to `CANCEL` immediately. Use the returned snapshot or `scripts/parse_status.py` to confirm the terminal state.
 - For broad status/progress requests with no dataset specified, list datasets first and aggregate `scripts/parse_status.py DATASET_ID` across all datasets.
 - If a dataset is specified, prefer `scripts/parse_status.py DATASET_ID` without `--doc-ids`.
 - If document IDs are specified, pass `--doc-ids`.
-- Summarize RUNNING files first.
-- Status reporting is derived from the dataset document list API. It does not fabricate percentage progress.
 - Retrieval defaults to `POST /api/v1/retrieval`.
 - `scripts/search.py` accepts `RAGFLOW_DATASET_IDS` from `.env` as the default dataset scope when the user does not specify dataset IDs explicitly.
 - Use `--retrieval-test` only when the user wants single-dataset debugging or specifically asks for that endpoint.
 - `scripts/list_models.py` calls `GET /v1/llm/my_llms` and uses `RAGFLOW_API_KEY` Bearer auth only.
-- Default model-listing behavior: list only available models, grouped by `type`, without extra detail fields.
-- If the user asks for details, provider / vendor breakdown, unavailable models, or a more exhaustive inventory, use `--include-details`, `--group-by factory`, and `--all` as needed.
-- When summarizing model availability to the user, prefer the grouped result in `groups` instead of reintroducing the raw server response shape.
