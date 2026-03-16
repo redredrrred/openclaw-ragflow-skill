@@ -35,6 +35,7 @@ The skill resolves progress scope by specificity:
 - if document IDs are specified, check only those documents
 
 For broad progress requests, the assistant should list currently `RUNNING` documents first.
+If parse status returns an error, return that error directly instead of guessing the cause.
 
 ## Common Prompts
 
@@ -169,7 +170,21 @@ Search document IDs "{document_id_1}" and "{document_id_2}" in "{dataset_name}" 
 Search "{dataset_name}" for "{query}" with a higher similarity threshold and show the best chunks.
 ```
 
-### 7. Troubleshooting
+### 7. Models
+
+#### List available models
+
+```text
+List available models.
+```
+
+#### Group models by provider
+
+```text
+Show models grouped by {provider}.
+```
+
+### 8. Troubleshooting
 
 #### Check why parsing failed
 
@@ -183,7 +198,7 @@ Check why this document failed to parse: "{document_id}" in "{dataset_name}".
 Show the parsing details for document ID "{document_id}" in "{dataset_name}".
 ```
 
-### 8. Deletion And Cleanup
+### 9. Deletion And Cleanup
 
 #### Delete specific documents from a dataset
 
@@ -216,7 +231,7 @@ Delete these datasets in RAGFlow:
 "{dataset_name_2}"
 ```
 
-### 9. Recommended Automation Prompt
+### 10. Recommended Automation Prompt
 
 ```text
 Upload the file at "{file_path}" to "{dataset_name}" and start parsing.
@@ -234,6 +249,7 @@ If you only need the most useful prompts, start with these:
 6. `Stop parsing document "{document_id}" in "{dataset_name}".`
 7. `Delete document "{document_id}" from "{dataset_name}".`
 8. `Search the "{dataset_name}" dataset for: "{query}".`
+9. `List available models.`
 
 ## Typical Workflow
 

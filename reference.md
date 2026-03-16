@@ -80,20 +80,3 @@ Apply this reference to all user-facing output for this skill.
 **Chunks:** 53
 ```
 
-## Model Listing
-
-- default to listing only available models
-- default to grouping by model `type`
-- if multiple model groups or models are shown, prefer a table
-- if the user asks for details, provider grouping, or unavailable models, expand the output accordingly
-- prefer the grouped result in `groups` instead of reintroducing the raw server response shape
-
-## Progress And Status Output
-
-- summarize `RUNNING` items first when reporting progress
-- status reporting should reflect the dataset document list API as-is; do not fabricate percentage progress
-
-## Error Output
-
-- when returning raw script output, preserve error fields exactly as returned
-- if JSON output contains `api_error`, present that object directly rather than replacing it with a guessed explanation

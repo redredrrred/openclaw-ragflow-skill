@@ -135,6 +135,7 @@ python scripts/stop_parse_documents.py DATASET_ID DOC_ID1 [DOC_ID2 ...]
 `stop_parse_documents.py` sends a stop request for explicit document IDs, then returns one current status snapshot for those documents.
 
 Use `parse_status.py` when the user asks to check progress or current parser status.
+If `parse_status.py` returns an error, return the error message directly and do not guess the cause.
 
 For later requests like "Check the progress" or "Which files are currently being parsed", resolve scope by specificity:
 - no dataset specified: inspect all datasets and all documents
