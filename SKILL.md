@@ -7,6 +7,86 @@ description: "Use for RAGFlow dataset and retrieval tasks: create, list, inspect
 
 Use only the bundled scripts in `scripts/`.
 Prefer `--json` for script execution so the returned fields can be relayed exactly.
+
+## Trigger Phrases
+
+Use this skill when the user intent matches any of these actions, in either Chinese or English, even if the wording is informal.
+
+- List datasets
+  Trigger phrases:
+  "list datasets", "show datasets", "show all datasets", "what datasets do I have"
+  "列出数据集", "查看数据集", "显示所有数据集", "我有哪些数据集"
+
+- Show dataset details
+  Trigger phrases:
+  "dataset details", "show dataset info", "inspect dataset", "describe this dataset"
+  "数据集详情", "查看数据集信息", "检查数据集", "显示这个数据集的信息"
+
+- Create dataset
+  Trigger phrases:
+  "create dataset", "new dataset", "add a dataset"
+  "创建数据集", "新建数据集", "添加数据集"
+
+- Update dataset
+  Trigger phrases:
+  "rename dataset", "update dataset", "change dataset description", "modify dataset"
+  "重命名数据集", "更新数据集", "修改数据集描述", "编辑数据集"
+
+- Delete dataset
+  Trigger phrases:
+  "delete dataset", "remove dataset", "drop dataset"
+  "删除数据集", "移除数据集", "清理数据集"
+
+- Upload documents
+  Trigger phrases:
+  "upload file", "upload document", "add file to dataset", "import files"
+  "上传文件", "上传文档", "把文件加到数据集", "导入文件"
+
+- List documents
+  Trigger phrases:
+  "list documents", "show files", "show documents in dataset", "what files are in this dataset"
+  "列出文档", "列出文件", "查看数据集里的文件", "这个数据集里有哪些文件"
+
+- Update document
+  Trigger phrases:
+  "rename document", "update document", "edit document metadata"
+  "重命名文档", "更新文档", "修改文档元数据"
+
+- Delete document
+  Trigger phrases:
+  "delete document", "remove file", "delete file from dataset"
+  "删除文档", "删除文件", "从数据集删除文件"
+
+- Start parsing
+  Trigger phrases:
+  "parse document", "start parsing", "run parsing", "re-parse document"
+  "解析文档", "开始解析", "执行解析", "重新解析文档"
+
+- Stop parsing
+  Trigger phrases:
+  "stop parsing", "cancel parsing", "stop parse job"
+  "停止解析", "取消解析", "停止解析任务"
+
+- Check parsing status or progress
+  Trigger phrases:
+  "check parsing status", "show progress", "what is still running", "parsing progress"
+  "查看解析状态", "查看进度", "还有哪些在运行", "解析进度"
+
+- Search / retrieve
+  Trigger phrases:
+  "search knowledge base", "search dataset", "retrieve chunks", "find relevant content"
+  "搜索知识库", "搜索数据集", "检索内容", "查找相关内容"
+
+- List models
+  Trigger phrases:
+  "list models", "show models", "available models", "what models are available", "list llms", "show llms", "model providers"
+  "列出模型", "查看模型", "可用模型", "有哪些模型", "列出大模型", "查看大模型", "模型供应商"
+
+- Show model details or provider grouping
+  Trigger phrases:
+  "model details", "show model details", "group models by provider", "list all models including unavailable ones"
+  "模型详情", "查看模型详情", "按供应商查看模型", "列出所有模型包括不可用模型"
+
 ## Workflow
 
 ```bash
@@ -79,6 +159,25 @@ python scripts/list_models.py --include-details --json
 python scripts/list_models.py --group-by factory --json
 python scripts/list_models.py --all --group-by factory --include-details --json
 ```
+
+## Model Listing
+
+- default to listing only available models
+- default to grouping by model `type`
+- if multiple model groups or models are shown, prefer a table
+- if the user asks for details, provider grouping, or unavailable models, expand the output accordingly
+- prefer the grouped result in `groups` instead of reintroducing the raw server response shape
+
+## Progress And Status Output
+
+- summarize `RUNNING` items first when reporting progress
+- status reporting should reflect the dataset document list API as-is; do not fabricate percentage progress
+
+## Error Output
+
+- when returning raw script output, preserve error fields exactly as returned
+- if JSON output contains `api_error`, present that object directly rather than replacing it with a guessed explanation
+
 
 ## Scope
 
