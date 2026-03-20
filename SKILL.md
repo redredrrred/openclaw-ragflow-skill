@@ -1,11 +1,9 @@
 ---
 name: ragflow-knowledge
 description: "Use for RAGFlow dataset and retrieval tasks: create, list, inspect, update, or delete datasets; list, upload, update, or delete documents in a dataset; start or stop parsing uploaded documents; check parser status through `parse_status.py`; and retrieve relevant chunks from RAGFlow datasets with `search.py`."
-
-# Required Environment Variables
-# This skill requires the following environment variables to be set:
-# - RAGFLOW_API_URL: Your RAGFlow server URL (e.g., http://127.0.0.1:9380)
-# - RAGFLOW_API_KEY: Your RAGFlow API key (get from RAGFlow Console → Profile → API)
+env_requires:
+  - RAGFLOW_API_URL
+  - RAGFLOW_API_KEY
 ---
 
 # ⚠️ Security and Privacy Notice

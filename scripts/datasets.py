@@ -25,7 +25,7 @@ def _build_global_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", dest="json_output", help="Print JSON output")
     parser.add_argument(
         "--base-url",
-        help="Base URL for the RAGFlow server (priority: --base-url > RAGFLOW_API_URL > RAGFLOW_API_URL > default)",
+        help="Base URL for the RAGFlow server (priority: --base-url > RAGFLOW_API_URL > default)",
     )
     return parser
 
