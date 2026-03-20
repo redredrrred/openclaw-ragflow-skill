@@ -93,6 +93,11 @@ def load_repo_env(repo_root: Path) -> None:
         if not key or key in os.environ:
             continue
 
+        # Only load RAGFLOW_ prefixed variables to avoid accidentally loading
+        # unrelated credentials (e.g., AWS keys, GitHub tokens) from the .env file
+        if not key.startswith('RAGFLOW_'):
+            continue
+
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
             value = value[1:-1]
@@ -103,8 +108,6 @@ def resolve_base_url(cli_base_url: str | None = None) -> str:
     base_url = (
         cli_base_url
         or os.getenv("RAGFLOW_API_URL")
-        or os.getenv("RAGFLOW_BASE_URL")
-        or os.getenv("HOST_ADDRESS")
         or DEFAULT_BASE_URL
     ).strip()
 

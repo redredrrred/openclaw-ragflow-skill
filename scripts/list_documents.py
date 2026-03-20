@@ -82,6 +82,11 @@ def _load_env_file(env_path: Path) -> None:
         if not key or key in os.environ:
             continue
 
+        # Only load RAGFLOW_ prefixed variables to avoid accidentally loading
+        # unrelated credentials (e.g., AWS keys, GitHub tokens) from the .env file
+        if not key.startswith('RAGFLOW_'):
+            continue
+
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
             value = value[1:-1]
@@ -109,7 +114,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--base-url",
         help="Base URL for the RAGFlow server "
-        "(priority: --base-url > RAGFLOW_BASE_URL > HOST_ADDRESS > default)",
+        "(priority: --base-url > RAGFLOW_API_URL > default)",
     )
     return parser.parse_args(argv)
 
@@ -122,8 +127,6 @@ def _validate_positive(name: str, value: int) -> None:
 def _resolve_base_url(cli_base_url: str | None) -> str:
     base_url = (
         cli_base_url
-        or os.getenv("RAGFLOW_BASE_URL")
-        or os.getenv("HOST_ADDRESS")
         or DEFAULT_BASE_URL
     ).strip()
 
