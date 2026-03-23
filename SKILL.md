@@ -89,8 +89,11 @@ Use this skill when the user intent matches any of these actions, in either Chin
 
 ## Workflow
 
+For one-off usage, pass `--base-url` and `--api-key-file`.
+For repeated usage, run one command with `--save-to-memory` and let later commands reuse the memory file or prompt interactively when needed.
+
 ```bash
-python scripts/datasets.py create "My Dataset" --description "Optional description"
+python scripts/datasets.py create "My Dataset" --description "Optional description" --base-url http://127.0.0.1:9380 --api-key-file /path/to/key.txt --save-to-memory
 python scripts/datasets.py list
 python scripts/datasets.py info DATASET_ID
 python scripts/update_dataset.py DATASET_ID --name "Renamed Dataset"
@@ -128,6 +131,7 @@ For dataset deletion, execute only against explicit dataset IDs. For document de
 ```bash
 python scripts/parse.py DATASET_ID DOC_ID1 [DOC_ID2 ...]
 python scripts/stop_parse_documents.py DATASET_ID DOC_ID1 [DOC_ID2 ...]
+python scripts/parse_status.py DATASET_ID
 ```
 
 `parse.py` only sends the parse request and returns immediately.
@@ -204,20 +208,29 @@ Support only:
 
 Do not use this skill for chunk editing, memory APIs, or other RAGFlow capabilities outside dataset operations and retrieval.
 
-## Environment
+## Runtime Credentials
 
-Configure `.env` with:
+Do not use `.env` or shell environment variables for this skill.
 
-```bash
-RAGFLOW_API_URL=http://127.0.0.1:9380
-RAGFLOW_API_KEY=ragflow-your-api-key-here
-RAGFLOW_DATASET_IDS=["dataset-id-1", "dataset-id-2"]
+Pass `--base-url` explicitly when needed. For the API key, prefer `--api-key-file /path/to/key.txt`, or let the script prompt securely.
+
+All scripts also support `--memory-file` and `--save-to-memory`. The default memory file is `~/.codex/memories/ragflow_credentials.json`.
+
+Example memory file:
+
+```json
+{
+  "base_url": "http://127.0.0.1:9380",
+  "api_key": "ragflow-your-api-key-here",
+  "dataset_ids": ["dataset-id-1", "dataset-id-2"]
+}
 ```
 
-`RAGFLOW_API_URL` is the primary base URL setting.
-`RAGFLOW_BASE_URL` is accepted as a legacy fallback for compatibility, but new setups should use `RAGFLOW_API_URL`.
+`base_url` must point to a trusted RAGFlow server because upload and update operations send document bytes and document metadata to that base URL over the API.
 
-When loading the repository `.env`, the bundled scripts only import `RAGFLOW_` variables into the process environment.
+`api_key` should be a minimally scoped bearer token for that server. Do not reuse a broader admin credential unless that access level is actually required for the task.
+
+Do not pass the raw API key directly on the command line because shell history and process listings may expose it.
 
 ## Endpoints
 - `GET /api/v1/datasets`
@@ -237,9 +250,9 @@ When loading the repository `.env`, the bundled scripts only import `RAGFLOW_` v
 ## Commands
 
 ```bash
-python scripts/datasets.py create "Example Dataset" --description "Quarterly reports"
+python scripts/datasets.py list --base-url http://127.0.0.1:9380 --api-key-file /path/to/key.txt
+python scripts/datasets.py create "Example Dataset" --description "Quarterly reports" --save-to-memory
 python scripts/datasets.py create "Example Dataset" --embedding-model bge-m3 --chunk-method naive --permission me
-python scripts/datasets.py list
 python scripts/datasets.py info DATASET_ID
 python scripts/update_dataset.py DATASET_ID --name "Updated Dataset" --description "Updated description"
 python scripts/datasets.py delete --ids DATASET_ID1,DATASET_ID2 --json
@@ -259,6 +272,8 @@ python scripts/list_models.py --json
 python scripts/list_models.py --include-details --json
 ```
 
+Once credentials are saved to the memory file, the later examples can omit `--base-url` and `--api-key-file`. If no memory value exists, the scripts will prompt for the missing value interactively.
+
 ## Notes
 
 - Dataset creation supports `--avatar`, `--description`, `--embedding-model`, `--permission`, `--chunk-method`, and `--language`.
@@ -276,6 +291,6 @@ python scripts/list_models.py --include-details --json
 - If a dataset is specified, prefer `scripts/parse_status.py DATASET_ID` without `--doc-ids`.
 - If document IDs are specified, pass `--doc-ids`.
 - Retrieval defaults to `POST /api/v1/retrieval`.
-- `scripts/search.py` accepts `RAGFLOW_DATASET_IDS` from `.env` as the default dataset scope when the user does not specify dataset IDs explicitly.
+- `scripts/search.py` accepts `dataset_ids` from the memory file as the default dataset scope when the user does not specify dataset IDs explicitly.
 - Use `--retrieval-test` only when the user wants single-dataset debugging or specifically asks for that endpoint.
-- `scripts/list_models.py` calls `GET /v1/llm/my_llms` and uses `RAGFLOW_API_KEY` Bearer auth only.
+- `scripts/list_models.py` calls `GET /v1/llm/my_llms` and uses the resolved bearer API key from `--api-key-file`, the memory file, or a secure prompt.

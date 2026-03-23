@@ -25,15 +25,14 @@ DEFAULT_PAGE = 1
 DEFAULT_PAGE_SIZE = 10
 DEFAULT_ORDERBY = "create_time"
 from common import (
+    ConfigError,
     DataError,
     ScriptError,
+    add_runtime_config_arguments,
     configure_stdio_utf8,
     ensure_success,
-    load_repo_env,
-    repo_root_from_path,
     request_json,
-    require_api_key,
-    resolve_base_url,
+    resolve_runtime_config,
 )
 
 
@@ -55,11 +54,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--suffix", help="Filter by file suffix, for example pdf")
     parser.add_argument("--run", help="Filter by parse run status, for example DONE")
     parser.add_argument("--json", action="store_true", dest="json_output", help="Print raw JSON response")
-    parser.add_argument(
-        "--base-url",
-        help="Base URL for the RAGFlow server "
-        "(priority: --base-url > RAGFLOW_API_URL > RAGFLOW_BASE_URL > HOST_ADDRESS > default)",
-    )
+    add_runtime_config_arguments(parser)
     return parser.parse_args(argv)
 
 
@@ -154,15 +149,12 @@ def _format_text(payload: dict[str, Any], dataset_id: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     configure_stdio_utf8()
-    load_repo_env(repo_root_from_path(__file__))
-
     args = _parse_args(argv)
 
     try:
         _validate_positive("--page", args.page)
         _validate_positive("--page-size", args.page_size)
-        api_key = require_api_key()
-        base_url = resolve_base_url(args.base_url)
+        base_url, api_key, _memory_config = resolve_runtime_config(args)
         payload = request_json(_build_documents_url(base_url, args), api_key)
         normalized = _normalize_payload(payload)
 

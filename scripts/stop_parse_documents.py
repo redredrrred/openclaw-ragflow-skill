@@ -8,15 +8,13 @@ from typing import Any
 from common import (
     ApiError,
     ScriptError,
+    add_runtime_config_arguments,
     configure_stdio_utf8,
     current_timestamp,
     ensure_success,
     format_json,
-    load_repo_env,
-    repo_root_from_path,
     request_json,
-    require_api_key,
-    resolve_base_url,
+    resolve_runtime_config,
     serialize_script_error,
 )
 from parse_status import collect_status_payload, format_status_text
@@ -29,10 +27,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("dataset_id", help="Dataset ID")
     parser.add_argument("document_ids", nargs="+", help="One or more document IDs to stop parsing")
     parser.add_argument("--json", action="store_true", dest="json_output", help="Print JSON output")
-    parser.add_argument(
-        "--base-url",
-        help="Base URL for the RAGFlow server (priority: --base-url > RAGFLOW_API_URL > RAGFLOW_BASE_URL > HOST_ADDRESS > default)",
-    )
+    add_runtime_config_arguments(parser)
     return parser.parse_args(argv)
 
 
@@ -82,14 +77,12 @@ def _format_payload(payload: dict[str, Any]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     configure_stdio_utf8()
-    load_repo_env(repo_root_from_path(__file__))
     args = _parse_args(argv)
     stop_request: dict[str, Any] | None = None
     phase = "validate"
 
     try:
-        base_url = resolve_base_url(args.base_url)
-        api_key = require_api_key()
+        base_url, api_key, _memory_config = resolve_runtime_config(args)
         phase = "stop_parse"
         stop_request = stop_parse(args.dataset_id, args.document_ids, base_url=base_url, api_key=api_key)
         phase = "status"

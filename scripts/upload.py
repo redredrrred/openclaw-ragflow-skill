@@ -18,17 +18,15 @@ from common import (
     ConfigError,
     DataError,
     ScriptError,
+    add_runtime_config_arguments,
     configure_stdio_utf8,
     current_timestamp,
     decode_json_response,
     ensure_success,
     extract_error_message,
     format_json,
-    load_repo_env,
-    repo_root_from_path,
     request_json,
-    require_api_key,
-    resolve_base_url,
+    resolve_runtime_config,
 )
 
 
@@ -49,10 +47,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                 help="Comma-separated document IDs, for example: id_1,id_2",
             )
         parser.add_argument("--json", action="store_true", dest="json_output", help="Print JSON output")
-        parser.add_argument(
-            "--base-url",
-            help="Base URL for the RAGFlow server (priority: --base-url > RAGFLOW_API_URL > RAGFLOW_BASE_URL > HOST_ADDRESS > default)",
-        )
+        add_runtime_config_arguments(parser)
         return parser.parse_args(argv)
 
     parser = argparse.ArgumentParser(description="Upload or delete documents in a RAGFlow dataset.")
@@ -60,10 +55,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("dataset_id", help="Dataset ID")
     parser.add_argument("files", nargs="+", help="File paths to upload")
     parser.add_argument("--json", action="store_true", dest="json_output", help="Print JSON output")
-    parser.add_argument(
-        "--base-url",
-        help="Base URL for the RAGFlow server (priority: --base-url > RAGFLOW_API_URL > RAGFLOW_BASE_URL > HOST_ADDRESS > default)",
-    )
+    add_runtime_config_arguments(parser)
     return parser.parse_args(argv)
 
 
@@ -298,12 +290,10 @@ def _format_list_text(payload: dict[str, Any]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     configure_stdio_utf8()
-    load_repo_env(repo_root_from_path(__file__))
     args = _parse_args(argv)
 
     try:
-        base_url = resolve_base_url(args.base_url)
-        api_key = require_api_key()
+        base_url, api_key, _memory_config = resolve_runtime_config(args)
         if args.command == "list":
             payload = list_documents(
                 args.dataset_id,

@@ -2,23 +2,20 @@
 # -*- coding: utf-8 -*-
 
 import argparse
-import json
-import os
 from typing import Any
 
 from common import (
     ConfigError,
     DataError,
     ScriptError,
+    add_runtime_config_arguments,
     configure_stdio_utf8,
     current_timestamp,
     ensure_success,
     format_json,
-    load_repo_env,
-    repo_root_from_path,
+    parse_dataset_ids_config,
     request_json,
-    require_api_key,
-    resolve_base_url,
+    resolve_runtime_config,
 )
 
 DEFAULT_TOP_K = 5
@@ -62,10 +59,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--retrieval-test", action="store_true", help="Use /api/v1/chunk/retrieval_test")
     parser.add_argument("--kb-id", help="Dataset ID required by retrieval_test")
     parser.add_argument("--json", action="store_true", dest="json_output", help="Print JSON output")
-    parser.add_argument(
-        "--base-url",
-        help="Base URL for the RAGFlow server (priority: --base-url > RAGFLOW_API_URL > RAGFLOW_BASE_URL > HOST_ADDRESS > default)",
-    )
+    add_runtime_config_arguments(parser)
     return parser.parse_args(argv)
 
 
@@ -89,36 +83,7 @@ def _parse_ids(raw_value: str, *, label: str) -> list[str]:
     return values
 
 
-def _parse_dataset_ids_env() -> list[str]:
-    raw_value = (os.getenv("RAGFLOW_DATASET_IDS") or "").strip()
-    if not raw_value:
-        return []
-
-    try:
-        parsed = json.loads(raw_value)
-    except json.JSONDecodeError:
-        return _parse_ids(raw_value, label="RAGFLOW_DATASET_IDS")
-
-    if isinstance(parsed, list):
-        values: list[str] = []
-        seen: set[str] = set()
-        for item in parsed:
-            value = str(item).strip()
-            if not value or value in seen:
-                continue
-            seen.add(value)
-            values.append(value)
-        if not values:
-            raise ConfigError("RAGFLOW_DATASET_IDS must include at least one dataset ID when it is set.")
-        return values
-
-    if isinstance(parsed, str):
-        return _parse_ids(parsed, label="RAGFLOW_DATASET_IDS")
-
-    raise ConfigError("RAGFLOW_DATASET_IDS must be a JSON array or a comma-separated string.")
-
-
-def _resolve_dataset_ids(args: argparse.Namespace) -> list[str]:
+def _resolve_dataset_ids(args: argparse.Namespace, memory_config: dict[str, Any]) -> list[str]:
     if args.dataset_ids:
         return _parse_ids(args.dataset_ids, label="--dataset-ids")
     if args.dataset_id:
@@ -126,7 +91,7 @@ def _resolve_dataset_ids(args: argparse.Namespace) -> list[str]:
         if not dataset_id:
             raise ConfigError("dataset_id must not be empty.")
         return [dataset_id]
-    return _parse_dataset_ids_env()
+    return parse_dataset_ids_config(memory_config.get("dataset_ids"), label="memory.dataset_ids")
 
 
 def _resolve_kb_id(args: argparse.Namespace, dataset_ids: list[str]) -> str:
@@ -180,7 +145,7 @@ def _extract_chunks(payload: dict[str, Any]) -> list[dict[str, Any]]:
     raise DataError("Retrieval response data must be an object or array.")
 
 
-def search(args: argparse.Namespace, *, base_url: str, api_key: str) -> dict[str, Any]:
+def search(args: argparse.Namespace, *, base_url: str, api_key: str, memory_config: dict[str, Any]) -> dict[str, Any]:
     if args.top_k <= 0:
         raise ConfigError("--top-k must be greater than 0.")
     if args.page <= 0:
@@ -191,7 +156,7 @@ def search(args: argparse.Namespace, *, base_url: str, api_key: str) -> dict[str
     if args.vector_weight is not None:
         _validate_range("--vector-weight", args.vector_weight)
 
-    dataset_ids = _resolve_dataset_ids(args)
+    dataset_ids = _resolve_dataset_ids(args, memory_config)
     doc_ids = _parse_ids(args.doc_ids, label="--doc-ids") if args.doc_ids else []
 
     body: dict[str, Any] = {
@@ -299,13 +264,11 @@ def _format_text(payload: dict[str, Any]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     configure_stdio_utf8()
-    load_repo_env(repo_root_from_path(__file__))
     args = _parse_args(argv)
 
     try:
-        base_url = resolve_base_url(args.base_url)
-        api_key = require_api_key()
-        payload = search(args, base_url=base_url, api_key=api_key)
+        base_url, api_key, memory_config = resolve_runtime_config(args)
+        payload = search(args, base_url=base_url, api_key=api_key, memory_config=memory_config)
         print(format_json(payload) if args.json_output else _format_text(payload))
         return 0
     except ScriptError as exc:
